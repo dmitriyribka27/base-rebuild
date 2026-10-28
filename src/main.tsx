@@ -6,6 +6,7 @@ import './techno.css'
 import './planner.css'
 import './v04.css'
 import './lists.css'
+import './journal.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

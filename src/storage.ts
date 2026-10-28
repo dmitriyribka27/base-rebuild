@@ -1,19 +1,27 @@
 import { defaultGroups, type GroupItem, type OccurrenceItem, type RepeatRule, type TaskItem, type TaskPriority } from './demo'
 import { defaultCollections, type CollectionItem, type ListEntry } from './collections'
+import type { DailyReport, JournalEntry, TaskMove } from './journal'
 import { occurrenceId } from './schedule'
 
 const DATABASE = 'base-rebuild'
-const VERSION = 3
+const VERSION = 4
 const TASKS_STORE = 'tasks'
 const GROUPS_STORE = 'groups'
 const OCCURRENCES_STORE = 'occurrences'
 const COLLECTIONS_STORE = 'collections'
 const ENTRIES_STORE = 'collectionEntries'
-const STORES = [TASKS_STORE, GROUPS_STORE, OCCURRENCES_STORE, COLLECTIONS_STORE, ENTRIES_STORE]
+const JOURNAL_STORE = 'journals'
+const REPORT_STORE = 'dailyReports'
+const MOVES_STORE = 'taskMoves'
+const STORES = [TASKS_STORE, GROUPS_STORE, OCCURRENCES_STORE, COLLECTIONS_STORE, ENTRIES_STORE, JOURNAL_STORE, REPORT_STORE, MOVES_STORE]
 export const BACKUP_FORMAT = 'BASE_REBUILD_BACKUP'
-export const BACKUP_VERSION = 3
+export const BACKUP_VERSION = 4
 
-export type AppData = { tasks: TaskItem[]; groups: GroupItem[]; occurrences: OccurrenceItem[]; collections: CollectionItem[]; collectionEntries: ListEntry[] }
+export type AppData = {
+  tasks: TaskItem[]; groups: GroupItem[]; occurrences: OccurrenceItem[]
+  collections: CollectionItem[]; collectionEntries: ListEntry[]
+  journals: JournalEntry[]; dailyReports: DailyReport[]; taskMoves: TaskMove[]
+}
 export type Backup = AppData & {
   format: typeof BACKUP_FORMAT
   schemaVersion: typeof BACKUP_VERSION
@@ -53,6 +61,12 @@ function openDatabase(): Promise<IDBDatabase> {
         const store = database.createObjectStore(ENTRIES_STORE, { keyPath: 'id' })
         store.createIndex('byCollection', 'collectionId')
       }
+      if (!database.objectStoreNames.contains(JOURNAL_STORE)) database.createObjectStore(JOURNAL_STORE, { keyPath: 'date' })
+      if (!database.objectStoreNames.contains(REPORT_STORE)) database.createObjectStore(REPORT_STORE, { keyPath: 'date' })
+      if (!database.objectStoreNames.contains(MOVES_STORE)) {
+        const store = database.createObjectStore(MOVES_STORE, { keyPath: 'id' })
+        store.createIndex('byFromDate', 'fromDate')
+      }
     }
     request.onsuccess = () => {
       const database = request.result
@@ -81,6 +95,9 @@ export async function readAllData(): Promise<AppData> {
   const occurrences = transaction.objectStore(OCCURRENCES_STORE).getAll()
   const collections = transaction.objectStore(COLLECTIONS_STORE).getAll()
   const collectionEntries = transaction.objectStore(ENTRIES_STORE).getAll()
+  const journals = transaction.objectStore(JOURNAL_STORE).getAll()
+  const dailyReports = transaction.objectStore(REPORT_STORE).getAll()
+  const taskMoves = transaction.objectStore(MOVES_STORE).getAll()
   await transactionDone(transaction)
   return {
     tasks: tasks.result as TaskItem[],
@@ -88,10 +105,13 @@ export async function readAllData(): Promise<AppData> {
     occurrences: occurrences.result as OccurrenceItem[],
     collections: (collections.result as CollectionItem[]).sort((a, b) => a.order - b.order),
     collectionEntries: collectionEntries.result as ListEntry[],
+    journals: journals.result as JournalEntry[],
+    dailyReports: dailyReports.result as DailyReport[],
+    taskMoves: taskMoves.result as TaskMove[],
   }
 }
 
-async function putRecord(storeName: string, value: TaskItem | GroupItem | OccurrenceItem | CollectionItem | ListEntry) {
+async function putRecord(storeName: string, value: TaskItem | GroupItem | OccurrenceItem | CollectionItem | ListEntry | JournalEntry | DailyReport | TaskMove) {
   const database = await openDatabase()
   const transaction = database.transaction(storeName, 'readwrite')
   transaction.objectStore(storeName).put(value)
@@ -112,6 +132,19 @@ export async function writeCollection(collection: CollectionItem): Promise<void>
 }
 export async function writeCollectionEntry(entry: ListEntry): Promise<void> {
   await putRecord(ENTRIES_STORE, entry)
+}
+export async function writeJournal(entry: JournalEntry): Promise<void> {
+  await putRecord(JOURNAL_STORE, entry)
+}
+export async function writeDailyReport(report: DailyReport): Promise<void> {
+  await putRecord(REPORT_STORE, report)
+}
+export async function writeTaskAndMove(task: TaskItem, move: TaskMove): Promise<void> {
+  const database = await openDatabase()
+  const transaction = database.transaction([TASKS_STORE, MOVES_STORE], 'readwrite')
+  transaction.objectStore(TASKS_STORE).put(task)
+  transaction.objectStore(MOVES_STORE).put(move)
+  await transactionDone(transaction)
 }
 
 // Keep the planner and collection checkmarks in one commit. If a write fails, both roll back.
@@ -140,6 +173,9 @@ export async function replaceAllData(data: AppData): Promise<void> {
   for (const occurrence of data.occurrences) transaction.objectStore(OCCURRENCES_STORE).put(occurrence)
   for (const collection of data.collections) transaction.objectStore(COLLECTIONS_STORE).put(collection)
   for (const entry of data.collectionEntries) transaction.objectStore(ENTRIES_STORE).put(entry)
+  for (const entry of data.journals) transaction.objectStore(JOURNAL_STORE).put(entry)
+  for (const report of data.dailyReports) transaction.objectStore(REPORT_STORE).put(report)
+  for (const move of data.taskMoves) transaction.objectStore(MOVES_STORE).put(move)
   await transactionDone(transaction)
 }
 
@@ -219,10 +255,42 @@ function isEntry(value: unknown, collectionIds: Set<string>): value is ListEntry
     && (item.deletedAt === null || validIso(item.deletedAt))
 }
 
+function validClock(value: unknown): value is string | null {
+  return value === null || (typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value))
+}
+function validScore(value: unknown): value is number | null {
+  return value === null || (Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 10)
+}
+function isJournal(value: unknown): value is JournalEntry {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  return validDate(item.date) && validClock(item.sleepAt) && validClock(item.wakeAt)
+    && validScore(item.energy) && validScore(item.mood)
+    && (item.cigarettes === null || (Number.isInteger(item.cigarettes) && (item.cigarettes as number) >= 0 && (item.cigarettes as number) <= 999))
+    && ['activity', 'thoughts', 'goodEvents', 'difficulties', 'conclusions', 'tomorrowPlans', 'workEvents', 'familyEvents', 'financeNotes']
+      .every(field => typeof item[field] === 'string' && (item[field] as string).length <= 12000)
+    && validIso(item.updatedAt)
+}
+function isReport(value: unknown): value is DailyReport {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  return validDate(item.date) && validIso(item.completedAt) && validIso(item.updatedAt)
+    && typeof item.comment === 'string' && item.comment.length <= 12000
+}
+function isMove(value: unknown, taskIds: Set<string>): value is TaskMove {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  return typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 128
+    && typeof item.taskId === 'string' && taskIds.has(item.taskId)
+    && typeof item.taskTitle === 'string' && item.taskTitle.length > 0 && item.taskTitle.length <= 180
+    && validDate(item.fromDate) && validDate(item.toDate) && item.fromDate !== item.toDate
+    && validIso(item.movedAt)
+}
+
 export function parseBackup(input: unknown): AppData {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Файл не является резервной копией BASE.')
   const data = input as Record<string, unknown>
-  if (data.format !== BACKUP_FORMAT || (data.schemaVersion !== 1 && data.schemaVersion !== 2 && data.schemaVersion !== BACKUP_VERSION)) {
+  if (data.format !== BACKUP_FORMAT || ![1, 2, 3, BACKUP_VERSION].includes(data.schemaVersion as number)) {
     throw new Error('Неподдерживаемый формат или версия резервной копии.')
   }
   if (!Array.isArray(data.tasks) || data.tasks.length > 30000) throw new Error('Некорректный список задач в резервной копии.')
@@ -244,14 +312,14 @@ export function parseBackup(input: unknown): AppData {
   }
   const occurrences = importedOccurrences as OccurrenceItem[]
   if (new Set(occurrences.map(item => item.id)).size !== occurrences.length) throw new Error('Повторяются отметки выполнения.')
-  const importedCollections = data.schemaVersion === 3 ? data.collections : defaultCollections.map(collection => ({ ...collection }))
+  const importedCollections = (data.schemaVersion as number) >= 3 ? data.collections : defaultCollections.map(collection => ({ ...collection }))
   if (!Array.isArray(importedCollections) || importedCollections.length > 300 || !importedCollections.every(isCollection)) {
     throw new Error('Некорректные коллекции в резервной копии.')
   }
   const collections = importedCollections as CollectionItem[]
   const collectionIds = new Set(collections.map(item => item.id))
   if (collectionIds.size !== collections.length) throw new Error('Повторяются идентификаторы коллекций.')
-  const importedEntries = data.schemaVersion === 3 ? data.collectionEntries : []
+  const importedEntries = (data.schemaVersion as number) >= 3 ? data.collectionEntries : []
   if (!Array.isArray(importedEntries) || importedEntries.length > 50000 || !importedEntries.every(item => isEntry(item, collectionIds))) {
     throw new Error('Некорректные пункты коллекций в резервной копии.')
   }
@@ -263,5 +331,15 @@ export function parseBackup(input: unknown): AppData {
     || new Set(linked.filter(task => !task.deletedAt).map(task => task.collectionItemId)).size !== linked.filter(task => !task.deletedAt).length) {
     throw new Error('Нарушены связи между коллекциями и планером.')
   }
-  return { tasks, groups: importedGroups, occurrences, collections, collectionEntries }
+  const importedJournals = data.schemaVersion === 4 ? data.journals : []
+  const importedReports = data.schemaVersion === 4 ? data.dailyReports : []
+  const importedMoves = data.schemaVersion === 4 ? data.taskMoves : []
+  if (!Array.isArray(importedJournals) || importedJournals.length > 40000 || !importedJournals.every(isJournal)
+    || new Set(importedJournals.map(item => item.date)).size !== importedJournals.length) throw new Error('Некорректные записи дневника.')
+  if (!Array.isArray(importedReports) || importedReports.length > 40000 || !importedReports.every(isReport)
+    || new Set(importedReports.map(item => item.date)).size !== importedReports.length) throw new Error('Некорректная история отчётов.')
+  if (!Array.isArray(importedMoves) || importedMoves.length > 100000 || !importedMoves.every(item => isMove(item, taskIds))
+    || new Set(importedMoves.map(item => item.id)).size !== importedMoves.length) throw new Error('Некорректная история переносов.')
+  return { tasks, groups: importedGroups, occurrences, collections, collectionEntries,
+    journals: importedJournals as JournalEntry[], dailyReports: importedReports as DailyReport[], taskMoves: importedMoves as TaskMove[] }
 }
