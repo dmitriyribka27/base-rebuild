@@ -15,11 +15,13 @@
 .journal-section-heading>svg{flex-shrink:0;width:38px;height:38px;background:linear-gradient(135deg,#235baf,#123678);border:1px solid #3873c1;padding:9px;border-radius:12px}
 .journal-section-heading>div span{font-size:9px;font-weight:710;color:#7aa8e6;letter-spacing:1px}
 .journal-section-heading h2{font-size:18px;letter-spacing:-.4px;margin:4px 0 0;color:#f1f7ff}
-.journal-time-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-bottom:12px}
+.journal-time-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:12px}
 .journal-time-grid>div{min-width:0}
 .journal-time-grid label,.journal-number-field label,.journal-text-field label{display:block;font-size:12px;color:#b8d5f7;font-weight:680;margin-bottom:8px}
 .journal-time-grid input,.journal-number-field input,.journal-text-field textarea{width:100%;min-width:0;border:1px solid #3369af;border-radius:11px;background:#061833;color:#f2f8ff;padding:13px 11px;font-size:14px;outline:none;color-scheme:dark}
-.journal-time-grid input{height:49px}
+.journal-time-grid input{display:block;height:42px;min-height:0;padding:0 10px;font-size:16px;line-height:normal}
+.journal-time-grid input::-webkit-date-and-time-value{text-align:left;min-height:0}
+.journal-time-grid input::-webkit-datetime-edit{padding:0}
 .journal-time-grid input:focus-visible,.journal-number-field input:focus-visible,.journal-text-field textarea:focus-visible{outline:2px solid #79bdff;outline-offset:1px}
 .journal-sleep-summary{display:flex;align-items:center;gap:7px;color:#8fb6e9;font-size:10px;line-height:1.5;margin-bottom:19px}
 .journal-score{padding:15px 0 17px;border-top:1px solid rgba(95,157,239,.18)}
@@ -66,4 +68,12 @@
 .journal-report-secondary button{display:flex;justify-content:center;align-items:center;gap:7px;min-height:46px;border:1px solid #3774bb;border-radius:11px;background:#0c2b66;color:#cbeaff;font-size:11px;padding:9px 6px}
 .journal-report-secondary button:disabled{opacity:.6}
 .journal-save-hint{display:flex;align-items:center;gap:7px;color:#8cb9ef;font-size:10px;line-height:1.5;margin:12px 0}
+/* iOS Safari gives native time controls a large minimum intrinsic width. Keep the
+   labels and compact pickers on their own rows so the controls never overlap. */
+@media(max-width:600px){
+  .journal-time-grid{grid-template-columns:minmax(0,1fr);gap:8px}
+  .journal-time-grid>div{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:42px}
+  .journal-time-grid label{margin-bottom:0}
+  .journal-time-grid input{flex:0 1 138px;width:138px;max-width:48%;height:40px;padding:0 10px}
+}
 @media(max-width:390px){.journal-section{padding:14px 12px 17px}.journal-date-panel>div strong{font-size:11px}.journal-date-tools{gap:5px}.journal-date-tools input{font-size:10px;padding:7px 5px}.journal-score-options{gap:6px}.journal-score-options button{min-height:40px}}
