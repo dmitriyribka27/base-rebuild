@@ -248,7 +248,17 @@ function isTask(value: unknown, groupIds: Set<string>): value is TaskItem {
     && typeof item.text === 'string' && item.text.trim().length > 0 && item.text.length <= 140
     && validDate(item.date) && typeof item.done === 'boolean'
     && (item.time === null || (typeof item.time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(item.time)))
+    && (item.endTime === undefined || item.endTime === null || (validClock(item.endTime) && typeof item.time === 'string' && item.endTime > item.time))
     && typeof item.notes === 'string' && item.notes.length <= 4000
+    && (item.subtasks === undefined || (Array.isArray(item.subtasks) && item.subtasks.length <= 30
+      && item.subtasks.every(part => part && typeof part === 'object' && !Array.isArray(part)
+        && typeof part.id === 'string' && part.id.length > 0 && part.id.length <= 128
+        && typeof part.text === 'string' && part.text.trim().length > 0 && part.text.length <= 140)
+      && new Set(item.subtasks.map(part => part.id)).size === item.subtasks.length))
+    && (item.subtaskDoneIds === undefined || (Array.isArray(item.subtaskDoneIds)
+      && item.subtaskDoneIds.length <= 30
+      && item.subtaskDoneIds.every(id => typeof id === 'string' && (item.subtasks as { id: string }[] | undefined)?.some(part => part.id === id))
+      && new Set(item.subtaskDoneIds).size === item.subtaskDoneIds.length))
     && priorities.has(item.priority as TaskPriority)
     && validIso(item.createdAt) && validIso(item.updatedAt)
     && (item.completedAt === null || validIso(item.completedAt))
@@ -265,13 +275,16 @@ function isTask(value: unknown, groupIds: Set<string>): value is TaskItem {
       && ['GEL', 'USD', 'RUB'].includes((item.payment as Record<string, unknown>).currency as string)))
     && (item.kind !== 'payment' || (item.payment !== undefined && item.payment !== null))
 }
-function isOccurrence(value: unknown, taskIds: Set<string>): value is OccurrenceItem {
+function isOccurrence(value: unknown, taskIds: Set<string>, tasksById: Map<string, TaskItem>): value is OccurrenceItem {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const item = value as Record<string, unknown>
   return typeof item.taskId === 'string' && taskIds.has(item.taskId)
     && validDate(item.date) && item.id === occurrenceId(item.taskId, item.date)
     && typeof item.done === 'boolean' && validIso(item.updatedAt)
     && (item.completedAt === null || validIso(item.completedAt))
+    && (item.subtaskDoneIds === undefined || (Array.isArray(item.subtaskDoneIds) && item.subtaskDoneIds.length <= 30
+      && item.subtaskDoneIds.every(id => typeof id === 'string' && (tasksById.get(item.taskId as string)?.subtasks ?? []).some(part => part.id === id))
+      && new Set(item.subtaskDoneIds).size === item.subtaskDoneIds.length))
 }
 
 function isCollection(value: unknown): value is CollectionItem {
@@ -385,9 +398,10 @@ export function parseBackup(input: unknown): AppData {
   if (!data.tasks.every(task => isTask(task, groupIds))) throw new Error('В резервной копии есть повреждённые задачи.')
   const tasks = (data.tasks as TaskItem[]).map(task => ({ ...task, repeat: task.repeat ?? 'none', repeatUntil: task.repeatUntil ?? null }))
   const taskIds = new Set(tasks.map(task => task.id))
+  const tasksById = new Map(tasks.map(task => [task.id, task]))
   if (taskIds.size !== tasks.length) throw new Error('Повторяются идентификаторы задач.')
   const importedOccurrences = data.schemaVersion === 1 ? [] : data.occurrences
-  if (!Array.isArray(importedOccurrences) || importedOccurrences.length > 100000 || !importedOccurrences.every(item => isOccurrence(item, taskIds))) {
+  if (!Array.isArray(importedOccurrences) || importedOccurrences.length > 100000 || !importedOccurrences.every(item => isOccurrence(item, taskIds, tasksById))) {
     throw new Error('В резервной копии есть повреждённые отметки повторов.')
   }
   const occurrences = importedOccurrences as OccurrenceItem[]

@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { ArrowRight, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CirclePlus, Clock3, ListFilter, Pencil, Plus, Repeat2, Settings2, Trash2, Wallet, X } from 'lucide-react'
-import { localDate, shiftDay, type GroupItem, type OccurrenceItem, type PaymentCurrency, type RepeatRule, type TaskItem, type TaskPriority } from './demo'
+import { ArrowRight, CalendarDays, ChevronLeft, ChevronRight, CirclePlus, Clock3, ListFilter, Plus, Settings2, Trash2, Wallet, X } from 'lucide-react'
+import { localDate, shiftDay, type GroupItem, type OccurrenceItem, type PaymentCurrency, type RepeatRule, type TaskItem, type TaskPriority, type TaskSubtask } from './demo'
 import { periodDates, recurrenceOf, scheduledForDate, sortedTasks, type ScheduledTask, type SortMode, type StatusFilter } from './schedule'
 import { paymentLabel, upcomingPayments } from './payments'
 import GroupManager, { type GroupDraft } from './GroupManager'
@@ -8,8 +8,9 @@ import QuestPanel from './QuestPanel'
 import TrackerPanel, { type TrackerDraft } from './TrackerPanel'
 import type { QuestCompletion, QuestId } from './rpg'
 import { lightDay, type DayMode, type TrackerDefinition, type TrackerReading } from './trackers'
+import TaskCard from './TaskCard'
 
-export type TaskDraft = { text: string; group: string; date: string; time: string; notes: string; priority: TaskPriority; repeat: RepeatRule; repeatUntil: string; kind: 'task' | 'payment'; paymentAmount: string; paymentCurrency: PaymentCurrency }
+export type TaskDraft = { text: string; group: string; date: string; time: string; endTime: string; notes: string; subtasks: TaskSubtask[]; priority: TaskPriority; repeat: RepeatRule; repeatUntil: string; kind: 'task' | 'payment'; paymentAmount: string; paymentCurrency: PaymentCurrency }
 type CalendarMode = 'day' | 'week' | 'month'
 type StorageState = 'loading' | 'ready' | 'error'
 
@@ -52,7 +53,7 @@ function filterRows(rows: ScheduledTask[], status: StatusFilter, group: string) 
   return rows.filter(row => (status === 'all' || row.done === (status === 'done')) && (group === 'all' || row.task.group === group))
 }
 
-export default function Planner({ tasks, groups, occurrences, questCompletions, questSavingId, onToggleQuest, dayModes, onToggleLight, trackers, trackerReadings, onSaveTracker, onRecordTracker, today, storage, saving, onSave, onToggle, onDelete, onSaveGroup }: {
+export default function Planner({ tasks, groups, occurrences, questCompletions, questSavingId, onToggleQuest, dayModes, onToggleLight, trackers, trackerReadings, onSaveTracker, onRecordTracker, today, storage, saving, onSave, onToggle, onToggleSubtask, onDelete, onSaveGroup }: {
   tasks: TaskItem[]
   groups: GroupItem[]
   occurrences: OccurrenceItem[]
@@ -70,6 +71,7 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
   saving: boolean
   onSave: (draft: TaskDraft, existing?: TaskItem) => Promise<void>
   onToggle: (scheduled: ScheduledTask) => Promise<void>
+  onToggleSubtask: (scheduled: ScheduledTask, id: string) => Promise<void>
   onDelete: (task: TaskItem) => Promise<void>
   onSaveGroup: (draft: GroupDraft, existing?: GroupItem) => Promise<void>
 }) {
@@ -78,12 +80,12 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [groupFilter, setGroupFilter] = useState('all')
   const [sortMode, setSortMode] = useState<SortMode>('time')
-  const [openGroups, setOpenGroups] = useState<string[]>(groups.map(group => group.id))
+  const [openTasks, setOpenTasks] = useState<string[]>([])
   const [managingGroups, setManagingGroups] = useState(false)
   const [resumeTaskAfterGroups, setResumeTaskAfterGroups] = useState(false)
   const [dialog, setDialog] = useState(false)
   const [editing, setEditing] = useState<TaskItem | undefined>()
-  const [draft, setDraft] = useState<TaskDraft>({ text: '', group: 'work', date: today, time: '', notes: '', priority: 'normal', repeat: 'none', repeatUntil: '', kind: 'task', paymentAmount: '', paymentCurrency: 'USD' })
+  const [draft, setDraft] = useState<TaskDraft>({ text: '', group: 'work', date: today, time: '', endTime: '', notes: '', subtasks: [], priority: 'normal', repeat: 'none', repeatUntil: '', kind: 'task', paymentAmount: '', paymentCurrency: 'USD' })
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [modalError, setModalError] = useState('')
 
@@ -107,12 +109,12 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
     const fallback = kind === 'payment' && groups.some(group => group.id === 'finance' && !group.archived)
       ? 'finance' : groups.find(group => !group.archived)?.id ?? groups[0]?.id ?? 'work'
     setEditing(undefined)
-    setDraft({ text: '', group: fallback, date: selected, time: '', notes: '', priority: 'normal', repeat: kind === 'payment' ? 'monthly' : 'none', repeatUntil: '', kind, paymentAmount: '', paymentCurrency: 'USD' })
+    setDraft({ text: '', group: fallback, date: selected, time: '', endTime: '', notes: '', subtasks: [], priority: 'normal', repeat: kind === 'payment' ? 'monthly' : 'none', repeatUntil: '', kind, paymentAmount: '', paymentCurrency: 'USD' })
     setConfirmDelete(false); setModalError(''); setDialog(true)
   }
   function edit(task: TaskItem) {
     setEditing(task)
-    setDraft({ text: task.text, group: task.group, date: task.date, time: task.time ?? '', notes: task.notes, priority: task.priority, repeat: recurrenceOf(task), repeatUntil: task.repeatUntil ?? '', kind: task.kind === 'payment' ? 'payment' : 'task', paymentAmount: task.payment?.amount.toString() ?? '', paymentCurrency: task.payment?.currency ?? 'USD' })
+    setDraft({ text: task.text, group: task.group, date: task.date, time: task.time ?? '', endTime: task.endTime ?? '', notes: task.notes, subtasks: task.subtasks ?? [], priority: task.priority, repeat: recurrenceOf(task), repeatUntil: task.repeatUntil ?? '', kind: task.kind === 'payment' ? 'payment' : 'task', paymentAmount: task.payment?.amount.toString() ?? '', paymentCurrency: task.payment?.currency ?? 'USD' })
     setConfirmDelete(false); setModalError(''); setDialog(true)
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -121,7 +123,7 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
     const fieldValue = (id: string, fallback: string) => (form.elements.namedItem(id) as HTMLInputElement | null)?.value ?? fallback
     // Safari's native date/time picker can update the rendered field before React state flushes.
     const submitted: TaskDraft = { ...draft,
-      date: fieldValue('task-date', draft.date), time: fieldValue('task-time', draft.time),
+      date: fieldValue('task-date', draft.date), time: fieldValue('task-time', draft.time), endTime: fieldValue('task-end-time', draft.endTime),
       repeatUntil: fieldValue('task-repeat-until', draft.repeatUntil),
       paymentAmount: fieldValue('payment-amount', draft.paymentAmount),
     }
@@ -130,7 +132,6 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
       await onSave(submitted, editing)
       setDialog(false)
       if (!editing || recurrenceOf(editing) === 'none') setSelected(submitted.date)
-      setOpenGroups(old => old.includes(submitted.group) ? old : [...old, submitted.group])
     } catch (error) { setModalError(error instanceof Error ? error.message : 'Не удалось сохранить задачу.') }
   }
   async function remove() {
@@ -158,24 +159,17 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
       <div className="filter-selects"><select aria-label="Фильтр по группе" value={groupFilter} onChange={event => setGroupFilter(event.target.value)}><option value="all">Все группы</option>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select><select aria-label="Сортировка задач" value={sortMode} onChange={event => setSortMode(event.target.value as SortMode)}><option value="time">По времени</option><option value="priority">По важности</option><option value="newest">Сначала новые</option></select></div>
     </div>
 
-    <div className="section-title tasks-title"><h2>{mode === 'day' ? 'Мои группы' : mode === 'week' ? 'Дни недели' : 'Дела месяца'}</h2>{mode === 'day' ? <button className="group-settings" onClick={() => manageGroups()}><Settings2 size={15} /> Настроить группы</button> : <span>{dates.length} дней</span>}</div>
+    <div className="section-title tasks-title"><h2>{mode === 'day' ? 'Задачи дня' : mode === 'week' ? 'Дни недели' : 'Дела месяца'}</h2>{mode === 'day' ? <button className="group-settings" onClick={() => manageGroups()}><Settings2 size={15} /> Категории</button> : <span>{dates.length} дней</span>}</div>
     {storage === 'loading' && <div className="empty-day"><span>Загружаем сохранённые задачи…</span></div>}
     {storage === 'error' && <div className="empty-day"><strong>Хранилище недоступно</strong><span>Проверь настройки Safari или открой приложение снова.</span></div>}
 
-    {storage === 'ready' && mode === 'day' && <div className="task-groups">
-      {groups.map(group => {
-        const rows = shownDay.filter(row => row.task.group === group.id)
-        if (!rows.length) return null
-        const groupAll = dailyAll.filter(row => row.task.group === group.id)
-        const complete = groupAll.filter(row => row.done).length
-        const expanded = openGroups.includes(group.id)
-        return <section className="task-group" key={group.id}>
-          <button className="group-heading" onClick={() => setOpenGroups(old => old.includes(group.id) ? old.filter(item => item !== group.id) : [...old, group.id])} aria-expanded={expanded}><span className="group-emoji">{group.emoji}</span><span className="group-name"><strong>{group.name}</strong><small>{group.note}</small></span><span className="group-count">{complete}/{groupAll.length}</span><ChevronDown className={expanded ? 'up' : ''} size={18} strokeWidth={1.8} /></button>
-          {expanded && <div className="group-rows">{rows.map(row => <div key={row.task.id} className={`task-row ${row.done ? 'done' : ''}`}>
-            <button className="task-toggle" onClick={() => void onToggle(row)} aria-label={`${row.done ? 'Отменить выполнение' : row.task.kind === 'payment' ? 'Отметить оплату' : 'Выполнить'}: ${row.task.text}`} aria-pressed={row.done} disabled={saving}><span className="task-check">{row.done && <Check size={16} strokeWidth={2.6} />}</span><span className="task-content"><span className="task-text">{row.task.kind === 'payment' && <Wallet size={14} className="payment-inline-icon"/>}{row.task.text}{row.task.payment && <span className="task-payment-amount"> · {paymentLabel(row.task.payment)}</span>}</span>{(row.task.time || row.task.priority === 'high' || row.recurring || row.task.collectionItemId) && <small>{row.task.time && `${row.task.time} · `}{row.task.priority === 'high' && 'Важное · '}{row.recurring && <><Repeat2 size={10} /> {repeatLabels[recurrenceOf(row.task)]}</>}{row.task.collectionItemId && <> · Из списка</>}</small>}</span></button>
-            <button className="task-edit" onClick={() => edit(row.task)} aria-label={`Изменить задачу: ${row.task.text}`} disabled={saving}><Pencil size={16} /></button>
-          </div>)}</div>}
-        </section>
+    {storage === 'ready' && mode === 'day' && <div className="boo-task-list">
+      {shownDay.map(row => {
+        const key = `${row.task.id}::${selected}`
+        const fallback = { id: row.task.group, name: 'Категория', emoji: '✳', note: '', order: 0 }
+        return <TaskCard key={key} row={row} group={groups.find(group => group.id === row.task.group) ?? fallback} expanded={openTasks.includes(key)} saving={saving}
+          onExpand={() => setOpenTasks(old => old.includes(key) ? old.filter(item => item !== key) : [...old, key])}
+          onToggle={() => void onToggle(row)} onToggleSubtask={id => void onToggleSubtask(row, id)} onEdit={() => edit(row.task)}/>
       })}
       {!shownDay.length && <div className="empty-day"><CalendarDays size={28} strokeWidth={1.3} /><strong>{dailyAll.length ? 'По фильтру ничего нет' : 'Этот день пока свободен'}</strong><span>{dailyAll.length ? 'Попробуй показать все задачи.' : 'Добавь первое дело. Время необязательно.'}</span></div>}
     </div>}
@@ -201,11 +195,14 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
         <label className="form-label" htmlFor="task-text">Название</label><input autoFocus id="task-text" required value={draft.text} onChange={event => setDraft(old => ({ ...old, text: event.target.value }))} placeholder={draft.kind === 'payment' ? 'Например, аренда квартиры' : 'Что нужно сделать?'} maxLength={140} />
         <div className="task-group-label"><label className="form-label" htmlFor="task-group">Группа</label><button type="button" onClick={() => manageGroups(true)}><Settings2 size={14}/> Добавить / удалить</button></div><select id="task-group" value={draft.group} onChange={event => setDraft(old => ({ ...old, group: event.target.value }))}>{groups.filter(group => !group.archived || group.id === draft.group).map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select>
         {draft.kind === 'payment' && <div className="payment-form-amount"><div><label className="form-label" htmlFor="payment-amount">Сумма</label><input name="payment-amount" id="payment-amount" type="text" inputMode="decimal" required placeholder="Например, 800" value={draft.paymentAmount} onChange={event => setDraft(old => ({ ...old, paymentAmount: event.target.value }))}/></div><div><label className="form-label" htmlFor="payment-currency">Валюта</label><select id="payment-currency" value={draft.paymentCurrency} onChange={event => setDraft(old => ({ ...old, paymentCurrency: event.target.value as PaymentCurrency }))}><option value="USD">USD · $</option><option value="GEL">GEL · ₾</option><option value="RUB">RUB · ₽</option></select></div></div>}
-        <div className="form-grid"><div><label className="form-label" htmlFor="task-date">Дата начала</label><input name="task-date" id="task-date" type="date" required value={draft.date} onChange={event => setDraft(old => ({ ...old, date: event.target.value }))} /></div><div><label className="form-label" htmlFor="task-time">Время, если нужно</label><input name="task-time" id="task-time" type="time" value={draft.time} onChange={event => setDraft(old => ({ ...old, time: event.target.value }))} /></div></div>
+        <div className="form-grid"><div><label className="form-label" htmlFor="task-date">Дата начала</label><input name="task-date" id="task-date" type="date" required value={draft.date} onChange={event => setDraft(old => ({ ...old, date: event.target.value }))} /></div><div><label className="form-label" htmlFor="task-time">Время начала, если нужно</label><input name="task-time" id="task-time" type="time" value={draft.time} onChange={event => setDraft(old => ({ ...old, time: event.target.value, endTime: event.target.value ? old.endTime : '' }))} /></div><div><label className="form-label" htmlFor="task-end-time">Время окончания, если нужно</label><input name="task-end-time" id="task-end-time" type="time" value={draft.endTime} onChange={event => setDraft(old => ({ ...old, endTime: event.target.value }))} /></div></div>
         <label className="form-label" htmlFor="task-repeat">Повторение</label><select id="task-repeat" value={draft.repeat} disabled={!!editing?.collectionItemId} onChange={event => setDraft(old => ({ ...old, repeat: event.target.value as RepeatRule, repeatUntil: '' }))}>{(Object.keys(repeatLabels) as RepeatRule[]).map(rule => <option key={rule} value={rule}>{repeatLabels[rule]}</option>)}</select>
         {editing?.collectionItemId && <p className="repeat-help">Эта задача связана с коллекцией. Повторы отключены, чтобы пункт не засчитывался несколько раз.</p>}
         {draft.repeat !== 'none' && <><label className="form-label" htmlFor="task-repeat-until">Повторять до (необязательно)</label><input name="task-repeat-until" id="task-repeat-until" type="date" min={draft.date} value={draft.repeatUntil} onChange={event => setDraft(old => ({ ...old, repeatUntil: event.target.value }))}/><p className="repeat-help">{draft.kind === 'payment' ? 'Для аренды 10-го числа выбери дату начала 10-го и «Раз в месяц». В коротких месяцах 29–31 число переносится на последний день.' : 'У каждого дня собственная отметка выполнения. Изменение параметров меняет всю серию.'}</p></>}
         <label className="form-label" htmlFor="task-priority">Приоритет</label><select id="task-priority" value={draft.priority} onChange={event => setDraft(old => ({ ...old, priority: event.target.value as TaskPriority }))}><option value="normal">Обычный</option><option value="high">Важный</option><option value="low">Невысокий</option></select>
+        {draft.kind === 'task' && <><div className="boo-subtask-heading"><label className="form-label">Подзадачи</label><button type="button" disabled={draft.subtasks.length >= 30} onClick={() => setDraft(old => ({ ...old, subtasks: [...old.subtasks, { id: crypto.randomUUID?.() ?? `part-${Date.now()}-${Math.random().toString(36).slice(2)}`, text: '' }] }))}><Plus size={14}/> Добавить</button></div>
+          {draft.subtasks.length > 0 && <div className="boo-subtask-editor">{draft.subtasks.map((part, index) => <div key={part.id}><input aria-label={`Подзадача ${index + 1}`} maxLength={140} placeholder={`Шаг ${index + 1}`} value={part.text} onChange={event => setDraft(old => ({ ...old, subtasks: old.subtasks.map(item => item.id === part.id ? { ...item, text: event.target.value } : item) }))}/><button type="button" aria-label={`Убрать подзадачу ${index + 1}`} onClick={() => setDraft(old => ({ ...old, subtasks: old.subtasks.filter(item => item.id !== part.id) }))}><X size={16}/></button></div>)}</div>}
+        </>}
         <label className="form-label" htmlFor="task-notes">Заметка, если нужна</label><textarea id="task-notes" rows={2} maxLength={4000} value={draft.notes} onChange={event => setDraft(old => ({ ...old, notes: event.target.value }))} placeholder="Детали, адрес, напоминание…" />
         <div className="modal-date"><Clock3 size={16} /> {draft.kind === 'payment' ? 'Время необязательно. Это запись в календаре, не банковский автоплатёж и не push-уведомление.' : 'Без времени — полноценная задача'}</div>
         {modalError && <p className="form-error" role="alert">{modalError}</p>}

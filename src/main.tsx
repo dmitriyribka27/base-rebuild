@@ -10,6 +10,7 @@ import './journal.css'
 import './rpg.css'
 import './trackers.css'
 import './insights.css'
+import './booCards.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

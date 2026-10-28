@@ -1,10 +1,12 @@
 import { parseKey, shiftDay, type OccurrenceItem, type RepeatRule, type TaskItem } from './demo'
+import { checkedSubtasks } from './taskDetails'
 
 export type ScheduledTask = {
   task: TaskItem
   date: string
   done: boolean
   recurring: boolean
+  checkedSubtaskIds: string[]
 }
 export type SortMode = 'time' | 'priority' | 'newest'
 export type StatusFilter = 'all' | 'open' | 'done'
@@ -37,9 +39,12 @@ export function scheduledForDate(tasks: TaskItem[], occurrences: OccurrenceItem[
   const states = new Map(occurrences.map(record => [record.id, record]))
   return tasks.filter(task => matchesDate(task, date)).map(task => {
     const recurring = recurrenceOf(task) !== 'none'
+    const occurrence = recurring ? states.get(occurrenceId(task.id, date)) : undefined
+    const done = recurring ? (occurrence?.done ?? false) : task.done
     return {
       task, date, recurring,
-      done: recurring ? (states.get(occurrenceId(task.id, date))?.done ?? false) : task.done,
+      done,
+      checkedSubtaskIds: checkedSubtasks(task, done, recurring ? occurrence?.subtaskDoneIds : task.subtaskDoneIds),
     }
   })
 }

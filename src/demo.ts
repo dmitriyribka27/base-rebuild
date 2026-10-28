@@ -3,8 +3,9 @@ export type TaskPriority = 'low' | 'normal' | 'high'
 export type RepeatRule = 'none' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
 export type PaymentCurrency = 'GEL' | 'USD' | 'RUB'
 export type PaymentInfo = { amount: number; currency: PaymentCurrency }
+export type TaskSubtask = { id: string; text: string }
 export type GroupItem = { id: string; name: string; emoji: string; note: string; order: number; archived?: boolean }
-export type OccurrenceItem = { id: string; taskId: string; date: string; done: boolean; updatedAt: string; completedAt: string | null }
+export type OccurrenceItem = { id: string; taskId: string; date: string; done: boolean; updatedAt: string; completedAt: string | null; subtaskDoneIds?: string[] }
 export type TaskItem = {
   id: string
   group: GroupId
@@ -12,7 +13,10 @@ export type TaskItem = {
   date: string
   done: boolean
   time: string | null
+  endTime?: string | null
   notes: string
+  subtasks?: TaskSubtask[]
+  subtaskDoneIds?: string[]
   priority: TaskPriority
   createdAt: string
   updatedAt: string

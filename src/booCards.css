@@ -1,0 +1,38 @@
+.boo-task-list{display:flex;flex-direction:column;gap:13px}
+.boo-task-card{position:relative;overflow:hidden;border:1px solid rgba(94,149,236,.34);border-radius:20px;background:linear-gradient(132deg,#102343,#0a1a34);box-shadow:0 6px 23px rgba(0,8,25,.2);color:#e6f1ff}
+.boo-card-main{display:flex;align-items:flex-start;gap:11px;padding:17px 14px 9px}
+.boo-card-icon{display:grid;place-items:center;flex:0 0 37px;width:37px;height:37px;border-radius:12px;background:color-mix(in srgb,var(--task-accent) 15%,#0a1d39);border:1px solid color-mix(in srgb,var(--task-accent) 45%,transparent);color:var(--task-accent);font-size:22px;line-height:1}
+.boo-card-body{min-width:0;flex:1}
+.boo-card-category{display:block;color:var(--task-accent);font-size:10px;letter-spacing:.5px;margin:0 0 6px;font-weight:680}
+.boo-card-title{border:0;background:none;padding:0;width:100%;display:flex;align-items:center;gap:6px;text-align:left;color:inherit;min-height:26px}
+.boo-card-title>span{font-size:14px;line-height:1.4;font-weight:660;flex:1;min-width:0;overflow-wrap:anywhere}
+.boo-card-title>small{font-size:12px;color:#a6c9eb;white-space:nowrap}
+.boo-card-title>svg{color:#a0bde6;flex-shrink:0;transition:transform .15s}
+.boo-card-title>svg.expanded{transform:rotate(180deg)}
+.boo-card-payment{color:#95d4ff;font-weight:650}
+.boo-card-meta{display:flex;flex-wrap:wrap;gap:5px 10px;margin-top:9px;color:#91aed9;font-size:11px;line-height:1.5}
+.boo-card-meta>span{display:inline-flex;align-items:center;gap:4px}
+.boo-card-meta svg{flex-shrink:0}
+.boo-card-check{flex:0 0 39px;width:39px;height:39px;border:1px solid color-mix(in srgb,var(--task-accent) 50%,transparent);border-radius:50%;display:grid;place-items:center;background:rgba(17,43,82,.75);color:transparent;transition:background .15s}
+.boo-card-check:disabled,.boo-card-part:disabled,.boo-card-foot button:disabled{opacity:.58}
+.boo-task-card.is-complete .boo-card-check{background:var(--task-accent);color:#061627}
+.boo-task-card.is-complete .boo-card-title>span{text-decoration:line-through;text-decoration-thickness:1.5px;color:#9faec3}
+.boo-card-parts{padding:6px 15px 7px 62px;display:flex;flex-direction:column;gap:3px}
+.boo-card-part{min-height:42px;padding:5px 0;display:flex;gap:10px;align-items:center;border:0;background:none;color:#d4e4fa;text-align:left;font-size:12px;line-height:1.45}
+.boo-card-part>span:last-child{overflow-wrap:anywhere;flex:1}
+.boo-part-check{display:grid;place-items:center;flex:0 0 26px;width:26px;height:26px;border-radius:50%;border:1px solid #5683b9;color:transparent}
+.boo-card-part.part-done .boo-part-check{background:var(--task-accent);color:#07142a;border-color:var(--task-accent)}
+.boo-card-part.part-done>span:last-child{text-decoration:line-through;color:#91a9c4}
+.boo-card-foot{display:flex;justify-content:space-between;align-items:center;gap:6px;margin:2px 14px 12px 62px;color:#84a6d3;font-size:10px}
+.boo-card-foot button{display:inline-flex;align-items:center;gap:5px;padding:5px 0;border:0;background:none;color:#a1cafa;font-size:11px}
+.boo-card-progress{height:3px;background:rgba(88,130,191,.18)}
+.boo-card-progress span{display:block;height:100%;width:var(--task-progress);background:var(--task-accent);transition:width .2s}
+.boo-task-card.is-complete{background:linear-gradient(132deg,#101e36,#0b1a2e);border-color:rgba(92,157,215,.25)}
+.boo-subtask-heading{margin-top:17px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.boo-subtask-heading .form-label{margin-top:0}
+.boo-subtask-heading button{border:1px solid #3e75bd;border-radius:9px;background:#15376d;padding:8px 10px;color:#d6eaff;font-size:11px;white-space:nowrap}
+.boo-subtask-editor{display:flex;flex-direction:column;gap:7px;margin-top:10px}
+.boo-subtask-editor>div{display:flex;gap:8px;align-items:center}
+.boo-subtask-editor input{flex:1;min-width:0}
+.boo-subtask-editor button{display:grid;place-items:center;flex:0 0 36px;width:36px;height:40px;border:1px solid #435c7f;border-radius:10px;background:#0c2447;color:#abcaf0}
+@media(max-width:390px){.boo-card-main{gap:9px;padding:15px 11px 9px}.boo-card-icon{flex-basis:32px;width:32px;height:32px}.boo-card-check{flex-basis:35px;width:35px;height:35px}.boo-card-parts{padding-left:51px}.boo-card-foot{margin-left:51px}}
