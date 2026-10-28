@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="BASE icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#060c22" />
+      <stop offset=".62" stop-color="#0a2052" />
+      <stop offset="1" stop-color="#1646b2" />
+    </linearGradient>
+    <linearGradient id="glyph" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e5f7ff" />
+      <stop offset=".52" stop-color="#66b8ff" />
+      <stop offset="1" stop-color="#1b58f5" />
+    </linearGradient>
+    <radialGradient id="shine" cx=".75" cy=".18" r=".85">
+      <stop offset="0" stop-color="#279aff" stop-opacity=".35" />
+      <stop offset="1" stop-color="#091331" stop-opacity="0" />
+    </radialGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="9" /></filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)" />
+  <rect width="512" height="512" fill="url(#shine)" />
+  <rect x="72" y="72" width="368" height="368" rx="84" fill="#030a22" fill-opacity=".4" stroke="#5aabff" stroke-opacity=".4" stroke-width="3" />
+  <path d="M192 147 V367 M192 147 H284 C347 147 354 244 288 249 H192 M192 249 H289 C368 249 368 367 284 367 H192" fill="none" stroke="#2b8cff" stroke-opacity=".7" stroke-width="36" stroke-linejoin="round" stroke-linecap="round" filter="url(#glow)" />
+  <path d="M192 147 V367 M192 147 H284 C347 147 354 244 288 249 H192 M192 249 H289 C368 249 368 367 284 367 H192" fill="none" stroke="url(#glyph)" stroke-width="26" stroke-linejoin="round" stroke-linecap="round" />
+  <circle cx="386" cy="385" r="11" fill="#7ad6ff" />
+  <circle cx="386" cy="385" r="23" fill="#53a5ff" opacity=".18" />
+</svg>

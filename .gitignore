@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.tsbuildinfo
+public/images/.dmitriy-avatar-v1.png.VKbN1x
+.DS_Store
