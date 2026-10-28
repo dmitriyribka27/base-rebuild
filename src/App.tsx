@@ -5,12 +5,13 @@ import {
   Sparkles, Trash2, TrendingUp, Upload, X,
 } from 'lucide-react'
 import { dateKey, defaultGroups, localDate, type GroupItem, type OccurrenceItem, type TaskItem } from './demo'
-import { defaultCollections, linkedTask, setEntryDone, setTaskDone, type CollectionItem, type ListEntry } from './collections'
+import { defaultCollections, linkedTask, setTaskDone, type CollectionItem, type ListEntry } from './collections'
 import { sleepHours, type DailyReport, type JournalEntry, type TaskMove } from './journal'
 import { JournalWriteQueue } from './journalQueue'
 import { XP_PER_LEVEL, QUESTS, experience, questRecordId, type QuestCompletion, type QuestId } from './rpg'
 import { trackerReadingId, lightDay, type DayMode, type TrackerDefinition, type TrackerReading } from './trackers'
 import { occurrenceId, recurrenceOf, scheduledForDate, type ScheduledTask } from './schedule'
+import { parsePaymentAmount } from './payments'
 import { createBackup, parseBackup, readAllData, replaceAllData, writeCollection, writeCollectionEntry, writeDailyReport, writeDayMode, writeEntryPair, writeGroup, writeJournal, writeLinkedTaskAndEntry, writeOccurrence, writeQuestCompletion, writeTask, writeTaskAndMove, writeTracker, writeTrackerReading, type AppData } from './storage'
 import Planner, { type TaskDraft } from './Planner'
 import type { TrackerDraft } from './TrackerPanel'
@@ -127,11 +128,14 @@ export default function App() {
 
   async function save(draft: TaskDraft, existing?: TaskItem) {
     if (storage !== 'ready' || saving) throw new Error('Хранилище пока недоступно.')
-    if (!groups.some(group => group.id === draft.group)) throw new Error('Выбранная группа не найдена.')
+    if (!groups.some(group => group.id === draft.group && (!group.archived || group.id === existing?.group))) throw new Error('Выбери доступную группу.')
     if (draft.repeatUntil && draft.repeatUntil < draft.date) throw new Error('Дата окончания не может быть раньше начала.')
     const timestamp = new Date().toISOString()
     const repeat = draft.repeat
     if (existing?.collectionItemId && repeat !== 'none') throw new Error('Связанная с коллекцией задача не может повторяться.')
+    if (existing?.collectionItemId && draft.kind === 'payment') throw new Error('Связанную с коллекцией задачу нельзя превратить в платёж.')
+    const amount = draft.kind === 'payment' ? parsePaymentAmount(draft.paymentAmount) : null
+    if (draft.kind === 'payment' && amount === null) throw new Error('Укажи сумму платежа больше нуля, максимум с двумя знаками после запятой.')
     const task: TaskItem = {
       id: existing?.id ?? (crypto.randomUUID?.() ?? `task-${Date.now()}-${Math.random().toString(36).slice(2)}`),
       text: draft.text.trim(), group: draft.group, date: draft.date, time: draft.time || null,
@@ -140,6 +144,8 @@ export default function App() {
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp,
       completedAt: repeat === 'none' ? existing?.completedAt ?? null : null, deletedAt: null,
       collectionItemId: existing?.collectionItemId ?? null,
+      kind: draft.kind,
+      payment: draft.kind === 'payment' ? { amount: amount!, currency: draft.paymentCurrency } : null,
     }
     setSaving(true)
     try {
@@ -165,12 +171,8 @@ export default function App() {
         setOccurrences(old => [...old.filter(record => record.id !== changed.id), changed])
       } else {
         const changed = setTaskDone(scheduled.task, !scheduled.done, timestamp)
-        const entry = collectionEntries.find(item => item.id === changed.collectionItemId)
-        if (entry && !entry.deletedAt) {
-          const linked = setEntryDone(entry, changed.done, timestamp)
-          await writeLinkedTaskAndEntry(changed, linked)
-          setCollectionEntries(old => old.map(item => item.id === linked.id ? linked : item))
-        } else await writeTask(changed)
+        // Collections remain timeless lists; a planned task's checkmark changes only the task.
+        await writeTask(changed)
         setTasks(old => old.map(task => task.id === changed.id ? changed : task))
       }
     } catch { setNotice('Не удалось сохранить отметку. Попробуй снова.') }
@@ -203,7 +205,7 @@ export default function App() {
     const name = draft.name.trim()
     if (!name) throw new Error('Введи название группы.')
     if (groups.some(group => group.id !== existing?.id && group.name.trim().toLowerCase() === name.toLowerCase())) throw new Error('Группа с таким названием уже существует.')
-    if (draft.archived && !existing?.archived && tasks.some(task => task.group === existing?.id && !task.deletedAt)) throw new Error('Сначала перенеси активные задачи в другие группы.')
+    if (draft.archived && !existing?.archived && groups.filter(group => !group.archived).length <= 1) throw new Error('Оставь хотя бы одну активную группу для новых задач.')
     const group: GroupItem = {
       id: existing?.id ?? (crypto.randomUUID?.() ?? `group-${Date.now()}`),
       name, emoji: draft.emoji.trim() || '✳', note: draft.note.trim(),
@@ -268,23 +270,6 @@ export default function App() {
     } finally { setSaving(false) }
   }
 
-  async function toggleEntry(entry: ListEntry) {
-    if (storage !== 'ready' || saving) return
-    const timestamp = new Date().toISOString()
-    const changed = setEntryDone(entry, !entry.done, timestamp)
-    const task = linkedTask(tasks, entry.id)
-    setSaving(true)
-    try {
-      if (task) {
-        const changedTask = setTaskDone(task, changed.done, timestamp)
-        await writeLinkedTaskAndEntry(changedTask, changed)
-        setTasks(old => old.map(item => item.id === changedTask.id ? changedTask : item))
-      } else await writeCollectionEntry(changed)
-      setCollectionEntries(old => old.map(item => item.id === changed.id ? changed : item))
-    } catch { setNotice('Не удалось сохранить отметку коллекции.') }
-    finally { setSaving(false) }
-  }
-
   async function deleteEntry(entry: ListEntry) {
     if (storage !== 'ready' || saving) throw new Error('Хранилище недоступно.')
     const timestamp = new Date().toISOString()
@@ -296,8 +281,7 @@ export default function App() {
 
   async function restoreEntry(entry: ListEntry) {
     if (storage !== 'ready' || saving) return
-    const task = linkedTask(tasks, entry.id)
-    const changed = { ...entry, deletedAt: null, done: task?.done ?? entry.done, completedAt: task?.completedAt ?? entry.completedAt, updatedAt: new Date().toISOString() }
+    const changed = { ...entry, deletedAt: null, updatedAt: new Date().toISOString() }
     setSaving(true)
     try { await writeCollectionEntry(changed); setCollectionEntries(old => old.map(item => item.id === changed.id ? changed : item)); setNotice('Пункт восстановлен') }
     catch { setNotice('Не удалось восстановить пункт.') }
@@ -319,7 +303,7 @@ export default function App() {
 
   async function planEntry(entry: ListEntry, date: string, groupId: string) {
     if (storage !== 'ready' || saving) throw new Error('Хранилище недоступно.')
-    if (entry.done || entry.deletedAt) throw new Error('Сначала верни пункт в список невыполненных.')
+    if (entry.deletedAt) throw new Error('Сначала восстанови пункт списка.')
     if (!groups.some(group => group.id === groupId && !group.archived)) throw new Error('Выбери активную группу планера.')
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T12:00:00Z`))) throw new Error('Укажи корректную дату.')
     const timestamp = new Date().toISOString()
@@ -467,14 +451,14 @@ export default function App() {
 
   const deleted = tasks.filter(task => task.deletedAt)
   return <div className="app-shell">
-    <header className="app-header"><button className="brand" onClick={() => setTab('home')} aria-label="BASE: REBUILD, перейти домой"><span className="brand-mark">B<span>·</span></span><span className="brand-words">BASE<span>REBUILD / 1.0</span></span></button><div className="header-right"><span className="demo-chip"><i /> {storage === 'ready' ? 'ЛОКАЛЬНО' : storage === 'loading' ? 'ЗАГРУЗКА' : 'ОШИБКА'}</span><button className="header-settings" onClick={() => setInfoOpen(true)} aria-label="Данные и резервные копии"><Settings2 size={19} strokeWidth={1.7} /></button></div></header>
+    <header className="app-header"><button className="brand" onClick={() => setTab('home')} aria-label="BASE: REBUILD, перейти домой"><span className="brand-mark">B<span>·</span></span><span className="brand-words">BASE<span>REBUILD / 1.1</span></span></button><div className="header-right"><span className="demo-chip"><i /> {storage === 'ready' ? 'ЛОКАЛЬНО' : storage === 'loading' ? 'ЗАГРУЗКА' : 'ОШИБКА'}</span><button className="header-settings" onClick={() => setInfoOpen(true)} aria-label="Данные и резервные копии"><Settings2 size={19} strokeWidth={1.7} /></button></div></header>
     {storage === 'error' && <div className="storage-alert" role="alert"><strong>Данные недоступны</strong><span>{storageError} Новые задачи не будут записываться.</span></div>}
-    <main className="app-main">{tab === 'home' ? <Home today={today} tasks={tasks} occurrences={occurrences} journals={journals} questCompletions={questCompletions} ready={storage === 'ready'} onToday={() => setTab('today')} onJournal={() => setTab('journal')} /> : tab === 'today' ? <Planner today={today} tasks={tasks} groups={groups} occurrences={occurrences} questCompletions={questCompletions} questSavingId={questSavingId} onToggleQuest={toggleQuest} dayModes={dayModes} onToggleLight={toggleLight} trackers={trackers} trackerReadings={trackerReadings} onSaveTracker={saveTracker} onRecordTracker={recordTracker} storage={storage} saving={saving} onSave={save} onToggle={toggle} onDelete={remove} onSaveGroup={saveGroup} /> : tab === 'lists' ? <Lists collections={collections} entries={collectionEntries} tasks={tasks} groups={groups} today={today} ready={storage === 'ready'} saving={saving} onSaveCollection={saveCollection} onSaveEntry={saveEntry} onToggleEntry={toggleEntry} onDeleteEntry={deleteEntry} onRestoreEntry={restoreEntry} onMoveEntry={moveEntry} onPlanEntry={planEntry} /> : tab === 'journal' ? <Journal today={today} ready={storage === 'ready'} journals={journals} reports={dailyReports} taskMoves={taskMoves} questCompletions={questCompletions} trackers={trackers} trackerReadings={trackerReadings} dayModes={dayModes} tasks={tasks} groups={groups} occurrences={occurrences} onUpdate={updateJournal} onSaveReport={saveReport} /> : <Progress today={today} records={questCompletions} reports={dailyReports} trackers={trackers} readings={trackerReadings} journals={journals} dayModes={dayModes} ready={storage === 'ready'}/>}</main>
+    <main className="app-main">{tab === 'home' ? <Home today={today} tasks={tasks} occurrences={occurrences} journals={journals} questCompletions={questCompletions} ready={storage === 'ready'} onToday={() => setTab('today')} onJournal={() => setTab('journal')} /> : tab === 'today' ? <Planner today={today} tasks={tasks} groups={groups} occurrences={occurrences} questCompletions={questCompletions} questSavingId={questSavingId} onToggleQuest={toggleQuest} dayModes={dayModes} onToggleLight={toggleLight} trackers={trackers} trackerReadings={trackerReadings} onSaveTracker={saveTracker} onRecordTracker={recordTracker} storage={storage} saving={saving} onSave={save} onToggle={toggle} onDelete={remove} onSaveGroup={saveGroup} /> : tab === 'lists' ? <Lists collections={collections} entries={collectionEntries} tasks={tasks} groups={groups} today={today} ready={storage === 'ready'} saving={saving} onSaveCollection={saveCollection} onSaveEntry={saveEntry} onDeleteEntry={deleteEntry} onRestoreEntry={restoreEntry} onMoveEntry={moveEntry} onPlanEntry={planEntry} /> : tab === 'journal' ? <Journal today={today} ready={storage === 'ready'} journals={journals} reports={dailyReports} taskMoves={taskMoves} questCompletions={questCompletions} trackers={trackers} trackerReadings={trackerReadings} dayModes={dayModes} tasks={tasks} groups={groups} occurrences={occurrences} onUpdate={updateJournal} onSaveReport={saveReport} /> : <Progress today={today} records={questCompletions} reports={dailyReports} trackers={trackers} readings={trackerReadings} journals={journals} dayModes={dayModes} ready={storage === 'ready'}/>}</main>
     <nav className="bottom-nav" aria-label="Основная навигация">{nav.map(({ id, name, Icon }) => <button key={id} className={tab === id ? 'current' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}><Icon size={21} strokeWidth={tab === id ? 2 : 1.7} /><span>{name}</span>{tab === id && <i />}</button>)}</nav>
     {!!notice && <div className="app-notice" role="status"><span>{notice}</span><button aria-label="Закрыть уведомление" onClick={() => setNotice('')}><X size={16} /></button></div>}
     {infoOpen && <div className="modal-backdrop info-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !saving) setInfoOpen(false) }}>
       <div className="info-dialog data-dialog"><button aria-label="Закрыть" className="close-button" onClick={() => setInfoOpen(false)} disabled={saving}><X size={22} /></button>
-        <span className="info-icon"><ShieldCheck size={31} /></span><h2>Данные BASE v1.0</h2>
+        <span className="info-icon"><ShieldCheck size={31} /></span><h2>Данные BASE v1.1</h2>
         <p>Задачи, коллекции, дневник, RPG-квесты, трекеры и история отчётов сохраняются в IndexedDB на этом устройстве. Они остаются после перезагрузки, но не синхронизируются с другими устройствами или ChatGPT. Очистка данных Safari может их удалить.</p>
         <div className="data-status"><span>Активных задач и серий</span><strong>{tasks.filter(task => !task.deletedAt).length}</strong></div>
         <div className="data-status"><span>Пунктов в коллекциях</span><strong>{collectionEntries.filter(entry => !entry.deletedAt).length}</strong></div>

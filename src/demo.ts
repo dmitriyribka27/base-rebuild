@@ -1,6 +1,8 @@
 export type GroupId = string
 export type TaskPriority = 'low' | 'normal' | 'high'
 export type RepeatRule = 'none' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
+export type PaymentCurrency = 'GEL' | 'USD' | 'RUB'
+export type PaymentInfo = { amount: number; currency: PaymentCurrency }
 export type GroupItem = { id: string; name: string; emoji: string; note: string; order: number; archived?: boolean }
 export type OccurrenceItem = { id: string; taskId: string; date: string; done: boolean; updatedAt: string; completedAt: string | null }
 export type TaskItem = {
@@ -19,6 +21,8 @@ export type TaskItem = {
   repeat?: RepeatRule
   repeatUntil?: string | null
   collectionItemId?: string | null
+  kind?: 'task' | 'payment'
+  payment?: PaymentInfo | null
 }
 
 export const defaultGroups: GroupItem[] = [

@@ -25,7 +25,11 @@ export function matchesDate(task: TaskItem, date: string): boolean {
   const weekday = parseKey(date).getUTCDay()
   if (rule === 'weekdays') return weekday !== 0 && weekday !== 6
   if (rule === 'weekly') return weekday === parseKey(task.date).getUTCDay()
-  if (rule === 'monthly') return Number(date.slice(8)) === Number(task.date.slice(8))
+  if (rule === 'monthly') {
+    const [year, month, day] = date.split('-').map(Number)
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
+    return day === Math.min(Number(task.date.slice(8)), lastDay)
+  }
   return false
 }
 

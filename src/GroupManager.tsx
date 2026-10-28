@@ -20,6 +20,7 @@ export default function GroupManager({ groups, tasks, saving, onSave, onClose }:
   const [editing, setEditing] = useState<GroupItem | null | 'new'>(null)
   const [draft, setDraft] = useState<GroupDraft>({ name: '', emoji: '✳', note: '' })
   const [error, setError] = useState('')
+  const [confirmGroupId, setConfirmGroupId] = useState<string | null>(null)
 
   function edit(group: GroupItem | 'new') {
     setEditing(group)
@@ -37,7 +38,7 @@ export default function GroupManager({ groups, tasks, saving, onSave, onClose }:
   async function toggleArchived(group: GroupItem) {
     try {
       await onSave({ name: group.name, note: group.note, emoji: group.emoji, archived: !group.archived }, group)
-      setError('')
+      setError(''); setConfirmGroupId(null)
     } catch (issue) { setError(issue instanceof Error ? issue.message : 'Не получилось изменить группу.') }
   }
 
@@ -47,19 +48,20 @@ export default function GroupManager({ groups, tasks, saving, onSave, onClose }:
       <p className="eyebrow">BASE / КАТЕГОРИИ</p>
       <h2>Мои группы</h2>
       {editing === null ? <>
-        <p>Создавай свои группы и переименовывай существующие. Задачи сохранят связь с группой после переименования.</p>
+        <p>Добавляй, переименовывай и убирай группы под себя. Удаление здесь означает архивирование: старые задачи сохранят свою историю.</p>
         <div className="manage-groups-list">{groups.map(group => {
           const count = tasks.filter(task => task.group === group.id && !task.deletedAt).length
           return <div key={group.id} className={group.archived ? 'archived' : ''}>
             <span className="manage-group-emoji">{group.emoji}</span>
             <span className="manage-group-name"><strong>{group.name}</strong><small>{group.archived ? 'Скрыта' : countLabel(count)}</small></span>
             <button className="group-edit-button" aria-label={`Изменить группу: ${group.name}`} onClick={() => edit(group)}><Pencil size={16} /></button>
-            <button className="group-archive-button" onClick={() => void toggleArchived(group)} disabled={saving || (!group.archived && count > 0)} title={!group.archived && count > 0 ? 'Сначала перенеси задачи в другие группы' : undefined}>{group.archived ? 'Вернуть' : 'Скрыть'}</button>
+            <button className="group-archive-button" onClick={() => { if (group.archived || count === 0) void toggleArchived(group); else { setConfirmGroupId(group.id); setError('') } }} disabled={saving}>{group.archived ? 'Вернуть' : 'Удалить'}</button>
           </div>
         })}
         </div>
+        {confirmGroupId && <div className="group-archive-confirm" role="alertdialog" aria-label="Убрать группу в архив"><strong>Убрать группу «{groups.find(group => group.id === confirmGroupId)?.name}»?</strong><p>Новые задачи в неё добавить будет нельзя. Уже созданные задачи и платежи останутся на своих датах.</p><div><button disabled={saving} onClick={() => { const group = groups.find(item => item.id === confirmGroupId); if (group) void toggleArchived(group) }}>Да, убрать</button><button onClick={() => setConfirmGroupId(null)}>Отмена</button></div></div>}
         <button className="data-action" onClick={() => edit('new')}><FolderPlus size={18} /> Создать группу</button>
-        <p className="data-footnote">Группу с активными задачами нельзя скрыть, пока дела не перенесены. Скрытые группы можно вернуть в любой момент.</p>
+        <p className="data-footnote">Архивные группы не предлагаются при создании новых дел. Все записи на старых датах остаются доступными; группу всегда можно вернуть.</p>
       </> : <form onSubmit={event => void submit(event)} className="group-editor">
         <button type="button" className="group-back" onClick={() => { setEditing(null); setError('') }}><ArrowLeft size={16} /> Все группы</button>
         <div className="group-name-fields"><div><label className="form-label" htmlFor="group-emoji">Значок</label><input id="group-emoji" value={draft.emoji} onChange={event => setDraft(old => ({ ...old, emoji: event.target.value }))} maxLength={8} /></div><div><label className="form-label" htmlFor="group-name">Название</label><input id="group-name" autoFocus required value={draft.name} onChange={event => setDraft(old => ({ ...old, name: event.target.value }))} maxLength={50} placeholder="Например, Учёба" /></div></div>

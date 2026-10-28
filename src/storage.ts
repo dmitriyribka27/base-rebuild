@@ -256,6 +256,14 @@ function isTask(value: unknown, groupIds: Set<string>): value is TaskItem {
     && (item.repeat === undefined || repeats.has(item.repeat as RepeatRule))
     && (item.repeatUntil === undefined || item.repeatUntil === null || (validDate(item.repeatUntil) && item.repeatUntil >= item.date))
     && (item.collectionItemId === undefined || item.collectionItemId === null || (typeof item.collectionItemId === 'string' && item.collectionItemId.length > 0 && item.collectionItemId.length <= 128))
+    && (item.kind === undefined || item.kind === 'task' || item.kind === 'payment')
+    && (item.payment === undefined || item.payment === null || (typeof item.payment === 'object' && !Array.isArray(item.payment)
+      && Number.isFinite((item.payment as Record<string, unknown>).amount)
+      && ((item.payment as Record<string, unknown>).amount as number) > 0
+      && ((item.payment as Record<string, unknown>).amount as number) <= 1_000_000_000
+      && Math.round(((item.payment as Record<string, unknown>).amount as number) * 100) / 100 === (item.payment as Record<string, unknown>).amount
+      && ['GEL', 'USD', 'RUB'].includes((item.payment as Record<string, unknown>).currency as string)))
+    && (item.kind !== 'payment' || (item.payment !== undefined && item.payment !== null))
 }
 function isOccurrence(value: unknown, taskIds: Set<string>): value is OccurrenceItem {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false

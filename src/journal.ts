@@ -1,5 +1,6 @@
 import { localDate, shiftDay, type GroupItem, type OccurrenceItem, type TaskItem } from './demo'
 import { scheduledForDate } from './schedule'
+import { paymentLabel } from './payments'
 import { QUESTS, dailyQuestXp, experience, hasCompletedQuest, type QuestCompletion } from './rpg'
 import { lightDay, readingsForReport, type TrackerDefinition, type TrackerReading, type DayMode } from './trackers'
 
@@ -63,7 +64,7 @@ export function makeDailyReport(input: {
   const { date, journal, tasks, groups, occurrences, taskMoves, questCompletions, comment } = input
   const forDay = scheduledForDate(tasks, occurrences, date)
   const groupNames = new Map(groups.map(group => [group.id, group.name]))
-  const taskLabel = (task: TaskItem) => `[${groupNames.get(task.group) ?? 'Без группы'}] ${task.text}${task.time ? ` (${task.time})` : ''}`
+  const taskLabel = (task: TaskItem) => `[${groupNames.get(task.group) ?? 'Без группы'}] ${task.text}${task.payment ? ` · ${paymentLabel(task.payment)}` : ''}${task.time ? ` (${task.time})` : ''}`
   const completed = forDay.filter(item => item.done).map(item => taskLabel(item.task))
   const incomplete = forDay.filter(item => !item.done).map(item => taskLabel(item.task))
   const transferred = taskMoves.filter(move => move.fromDate === date).sort((a, b) => a.movedAt.localeCompare(b.movedAt))
@@ -80,6 +81,9 @@ export function makeDailyReport(input: {
   const rpg = experience(questCompletions, date)
   const quests = QUESTS.filter(quest => hasCompletedQuest(questCompletions, date, quest.id)).map(quest => `${quest.title} (+${quest.xp} XP)`)
   const tracked = readingsForReport(input.trackers ?? [], input.trackerReadings ?? [], date)
+  const dayPayments = forDay.filter(item => item.task.kind === 'payment' && !!item.task.payment)
+    .map(item => `${item.task.text}: ${paymentLabel(item.task.payment!)} — ${item.done ? 'отмечено как оплачено' : 'запланировано, оплата не подтверждена'}`)
+  const finance = [journal?.financeNotes?.trim(), dayPayments.length ? lines(dayPayments) : ''].filter(Boolean).join('\n')
   const isLight = lightDay(input.dayModes ?? [], date)
   return `BASE: REBUILD — DAILY REPORT
 
@@ -119,7 +123,7 @@ ${paragraph(journal?.workEvents)}
 ${paragraph(journal?.familyEvents)}
 
 ФИНАНСЫ
-${paragraph(journal?.financeNotes)}
+${value(finance)}
 
 ХОРОШИЕ СОБЫТИЯ
 ${paragraph(journal?.goodEvents)}

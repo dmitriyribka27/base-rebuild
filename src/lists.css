@@ -73,3 +73,17 @@
 .plan-entry-title{padding:13px 15px;color:#d7ebff;background:#0e2d6b;border:1px solid #315e9e;border-radius:12px;font-size:14px;font-weight:670;line-height:1.5;overflow-wrap:anywhere}
 .list-plan-hint{font-size:11px;color:#99b6e5;line-height:1.6;margin:17px 0 0}
 @media(max-width:390px){.collection-grid{gap:9px}.collection-card{padding:12px;min-height:179px}.collection-symbol{width:40px;height:40px}.collection-card>strong{font-size:13px}.collection-card>small{font-size:9px}.collection-entry-main{gap:9px}.collection-entry-actions{padding-left:48px}}
+
+/* v1.1 — timeless lists without checkmarks, percentages or completion filters. */
+.lists-summary-simple{padding:15px 18px}
+.lists-summary-simple>div:nth-child(2){margin:10px 0 0}
+.lists-summary-simple strong span{font-size:14px}
+.collection-card{min-height:155px}
+.collection-card-shopping{grid-column:1/-1;min-height:136px;background:linear-gradient(135deg,#1754a9,#0a2c6a 57%,#071c3d);border-color:#5eafff;box-shadow:inset 0 1px #d4eaff42,0 0 22px #307eff22}
+.collection-card-shopping .collection-symbol{background:#2769c0}
+.collection-card-bottom{margin:10px 0 0;color:#9fcbff}
+.list-plain-count{padding:12px 14px;border-radius:12px;border:1px solid #2d5791;background:#0a2451;color:#b4d4ff;font-size:12px;margin:15px 0 16px}
+.collection-entry-main{padding:14px}
+.collection-entry-actions{padding-left:14px}
+.list-filters .list-tag-filter{margin-top:0}
+@media(max-width:390px){.collection-card{min-height:145px}.collection-card-shopping{min-height:132px}.collection-entry-actions{padding-left:14px}}

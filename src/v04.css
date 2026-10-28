@@ -47,3 +47,9 @@
 .group-name-fields #group-emoji{text-align:center;font-size:18px}
 .group-editor .submit-task{margin-top:18px}
 @media(max-width:390px){.planner-tools{padding:10px}.period-day{gap:8px;padding:12px 9px}.period-day-date{width:78px}.period-day-date strong{font-size:11px}.manage-groups-list>div{gap:5px}.manage-group-emoji{width:29px;height:29px}.group-edit-button{padding:6px 3px}}
+.group-archive-confirm{border:1px solid #8c607c;background:#251a41;border-radius:12px;padding:13px;margin:12px 0;color:#f8e1f1}
+.group-archive-confirm>strong{font-size:12px}
+.group-archive-confirm>p{font-size:11px;line-height:1.55;margin:7px 0 12px;color:#e3bed2}
+.group-archive-confirm>div{display:flex;gap:8px}
+.group-archive-confirm button{flex:1;border:1px solid #9b708a;border-radius:9px;background:#713452;color:#fff;padding:10px;font-size:11px}
+.group-archive-confirm button:last-child{background:transparent;border-color:#6d688e}

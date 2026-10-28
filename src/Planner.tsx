@@ -1,14 +1,15 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { ArrowRight, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CirclePlus, Clock3, ListFilter, Pencil, Plus, Repeat2, Settings2, Trash2, X } from 'lucide-react'
-import { localDate, shiftDay, type GroupItem, type OccurrenceItem, type RepeatRule, type TaskItem, type TaskPriority } from './demo'
+import { ArrowRight, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CirclePlus, Clock3, ListFilter, Pencil, Plus, Repeat2, Settings2, Trash2, Wallet, X } from 'lucide-react'
+import { localDate, shiftDay, type GroupItem, type OccurrenceItem, type PaymentCurrency, type RepeatRule, type TaskItem, type TaskPriority } from './demo'
 import { periodDates, recurrenceOf, scheduledForDate, sortedTasks, type ScheduledTask, type SortMode, type StatusFilter } from './schedule'
+import { paymentLabel, upcomingPayments } from './payments'
 import GroupManager, { type GroupDraft } from './GroupManager'
 import QuestPanel from './QuestPanel'
 import TrackerPanel, { type TrackerDraft } from './TrackerPanel'
 import type { QuestCompletion, QuestId } from './rpg'
 import { lightDay, type DayMode, type TrackerDefinition, type TrackerReading } from './trackers'
 
-export type TaskDraft = { text: string; group: string; date: string; time: string; notes: string; priority: TaskPriority; repeat: RepeatRule; repeatUntil: string }
+export type TaskDraft = { text: string; group: string; date: string; time: string; notes: string; priority: TaskPriority; repeat: RepeatRule; repeatUntil: string; kind: 'task' | 'payment'; paymentAmount: string; paymentCurrency: PaymentCurrency }
 type CalendarMode = 'day' | 'week' | 'month'
 type StorageState = 'loading' | 'ready' | 'error'
 
@@ -79,9 +80,10 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
   const [sortMode, setSortMode] = useState<SortMode>('time')
   const [openGroups, setOpenGroups] = useState<string[]>(groups.map(group => group.id))
   const [managingGroups, setManagingGroups] = useState(false)
+  const [resumeTaskAfterGroups, setResumeTaskAfterGroups] = useState(false)
   const [dialog, setDialog] = useState(false)
   const [editing, setEditing] = useState<TaskItem | undefined>()
-  const [draft, setDraft] = useState<TaskDraft>({ text: '', group: 'work', date: today, time: '', notes: '', priority: 'normal', repeat: 'none', repeatUntil: '' })
+  const [draft, setDraft] = useState<TaskDraft>({ text: '', group: 'work', date: today, time: '', notes: '', priority: 'normal', repeat: 'none', repeatUntil: '', kind: 'task', paymentAmount: '', paymentCurrency: 'USD' })
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [modalError, setModalError] = useState('')
 
@@ -98,27 +100,37 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
   const percentage = totals.count ? Math.round(totals.done / totals.count * 100) : 0
   const shownDay = period[0]?.filtered ?? []
   const dailyAll = period[0]?.all ?? []
+  const upcoming = useMemo(() => upcomingPayments(tasks, occurrences, today).slice(0, 4), [tasks, occurrences, today])
 
-  function add() {
+  function add(kind: 'task' | 'payment' = 'task') {
     if (storage !== 'ready') return
-    const fallback = groups.find(group => !group.archived)?.id ?? groups[0]?.id ?? 'work'
+    const fallback = kind === 'payment' && groups.some(group => group.id === 'finance' && !group.archived)
+      ? 'finance' : groups.find(group => !group.archived)?.id ?? groups[0]?.id ?? 'work'
     setEditing(undefined)
-    setDraft({ text: '', group: fallback, date: selected, time: '', notes: '', priority: 'normal', repeat: 'none', repeatUntil: '' })
+    setDraft({ text: '', group: fallback, date: selected, time: '', notes: '', priority: 'normal', repeat: kind === 'payment' ? 'monthly' : 'none', repeatUntil: '', kind, paymentAmount: '', paymentCurrency: 'USD' })
     setConfirmDelete(false); setModalError(''); setDialog(true)
   }
   function edit(task: TaskItem) {
     setEditing(task)
-    setDraft({ text: task.text, group: task.group, date: task.date, time: task.time ?? '', notes: task.notes, priority: task.priority, repeat: recurrenceOf(task), repeatUntil: task.repeatUntil ?? '' })
+    setDraft({ text: task.text, group: task.group, date: task.date, time: task.time ?? '', notes: task.notes, priority: task.priority, repeat: recurrenceOf(task), repeatUntil: task.repeatUntil ?? '', kind: task.kind === 'payment' ? 'payment' : 'task', paymentAmount: task.payment?.amount.toString() ?? '', paymentCurrency: task.payment?.currency ?? 'USD' })
     setConfirmDelete(false); setModalError(''); setDialog(true)
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!draft.text.trim() || saving) return
+    const form = event.currentTarget
+    const fieldValue = (id: string, fallback: string) => (form.elements.namedItem(id) as HTMLInputElement | null)?.value ?? fallback
+    // Safari's native date/time picker can update the rendered field before React state flushes.
+    const submitted: TaskDraft = { ...draft,
+      date: fieldValue('task-date', draft.date), time: fieldValue('task-time', draft.time),
+      repeatUntil: fieldValue('task-repeat-until', draft.repeatUntil),
+      paymentAmount: fieldValue('payment-amount', draft.paymentAmount),
+    }
+    if (!submitted.text.trim() || !submitted.date || submitted.repeatUntil && submitted.repeatUntil < submitted.date || saving) return
     try {
-      await onSave(draft, editing)
+      await onSave(submitted, editing)
       setDialog(false)
-      if (!editing || recurrenceOf(editing) === 'none') setSelected(draft.date)
-      setOpenGroups(old => old.includes(draft.group) ? old : [...old, draft.group])
+      if (!editing || recurrenceOf(editing) === 'none') setSelected(submitted.date)
+      setOpenGroups(old => old.includes(submitted.group) ? old : [...old, submitted.group])
     } catch (error) { setModalError(error instanceof Error ? error.message : 'Не удалось сохранить задачу.') }
   }
   async function remove() {
@@ -127,6 +139,8 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
     catch (error) { setModalError(error instanceof Error ? error.message : 'Не удалось удалить задачу.') }
   }
   function chooseDate(date: string) { setSelected(date); setMode('day') }
+  function manageGroups(fromTask = false) { setResumeTaskAfterGroups(fromTask); if (fromTask) setDialog(false); setManagingGroups(true) }
+  function closeGroupManager() { setManagingGroups(false); if (resumeTaskAfterGroups) setDialog(true); setResumeTaskAfterGroups(false) }
 
   return <div className="page today-page">
     <div className="today-heading"><div><p className="eyebrow">ПЛАНЕР <span className="eyebrow-dot">/</span> {mode === 'day' ? 'ДЕНЬ' : mode === 'week' ? 'НЕДЕЛЯ' : 'МЕСЯЦ'}</p><h1>{selected === today && mode === 'day' ? 'Сегодня' : mode === 'day' ? 'План дня' : mode === 'week' ? 'Неделя' : 'Месяц'}<span className="mint-period">.</span></h1></div><button className="square-action" aria-label="Вернуться к сегодняшней дате" onClick={() => { setSelected(today); setMode('day') }}><CalendarDays size={19} strokeWidth={1.7} /></button></div>
@@ -135,13 +149,16 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
     <div className="view-toggle" role="tablist" aria-label="Режим календаря">{([{ id: 'day', label: 'День' }, { id: 'week', label: 'Неделя' }, { id: 'month', label: 'Месяц' }] as { id: CalendarMode; label: string }[]).map(item => <button role="tab" aria-selected={mode === item.id} className={mode === item.id ? 'active' : ''} key={item.id} onClick={() => setMode(item.id)}>{item.label}</button>)}</div>
     {mode === 'month' && <MonthPicker selected={selected} today={today} counts={counts} onSelect={chooseDate} />}
     <div className="task-progress"><div className="task-progress-caption"><div><span className="caps-label">ПРОГРЕСС {mode === 'day' ? 'ДНЯ' : mode === 'week' ? 'НЕДЕЛИ' : 'МЕСЯЦА'}</span><strong>{totals.done} <span>из {totals.count}</span></strong></div><span className="progress-percent">{percentage}%</span></div><div className="progress-track" role="progressbar" aria-valuenow={totals.done} aria-valuemin={0} aria-valuemax={totals.count || 1}><div className="progress-fill" style={{ width: `${percentage}%` }} /></div></div>
+    <section className="payment-calendar-card"><div className="payment-calendar-heading"><span className="payment-calendar-icon"><Wallet size={20}/></span><div><strong>Платежи в календаре</strong><small>Сумма, валюта и даты повторов</small></div><button disabled={storage !== 'ready'} onClick={() => add('payment')}><Plus size={16}/> Платёж</button></div>
+      {upcoming.length ? <div className="upcoming-payments">{upcoming.map(row => <button key={`${row.task.id}-${row.date}`} onClick={() => chooseDate(row.date)}><span><strong>{row.task.text}</strong><small>{localDate(row.date, { day: 'numeric', month: 'short', year: 'numeric' })}{row.recurring ? ' · каждый месяц' : ''}</small></span><b>{row.task.payment && paymentLabel(row.task.payment)}</b><ChevronRight size={15}/></button>)}</div> : <p className="upcoming-payments-empty">На ближайшие 60 дней платежи не добавлены.</p>}
+    </section>
     <div className="planner-tools">
       <div className="planner-filter-label"><ListFilter size={15} /> Вид задач</div>
       <div className="filter-pills">{([{ id: 'all', text: 'Все' }, { id: 'open', text: 'Открытые' }, { id: 'done', text: 'Готово' }] as { id: StatusFilter; text: string }[]).map(item => <button key={item.id} className={statusFilter === item.id ? 'active' : ''} onClick={() => setStatusFilter(item.id)}>{item.text}</button>)}</div>
       <div className="filter-selects"><select aria-label="Фильтр по группе" value={groupFilter} onChange={event => setGroupFilter(event.target.value)}><option value="all">Все группы</option>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select><select aria-label="Сортировка задач" value={sortMode} onChange={event => setSortMode(event.target.value as SortMode)}><option value="time">По времени</option><option value="priority">По важности</option><option value="newest">Сначала новые</option></select></div>
     </div>
 
-    <div className="section-title tasks-title"><h2>{mode === 'day' ? 'Мои группы' : mode === 'week' ? 'Дни недели' : 'Дела месяца'}</h2>{mode === 'day' ? <button className="group-settings" onClick={() => setManagingGroups(true)}><Settings2 size={15} /> Группы</button> : <span>{dates.length} дней</span>}</div>
+    <div className="section-title tasks-title"><h2>{mode === 'day' ? 'Мои группы' : mode === 'week' ? 'Дни недели' : 'Дела месяца'}</h2>{mode === 'day' ? <button className="group-settings" onClick={() => manageGroups()}><Settings2 size={15} /> Настроить группы</button> : <span>{dates.length} дней</span>}</div>
     {storage === 'loading' && <div className="empty-day"><span>Загружаем сохранённые задачи…</span></div>}
     {storage === 'error' && <div className="empty-day"><strong>Хранилище недоступно</strong><span>Проверь настройки Safari или открой приложение снова.</span></div>}
 
@@ -155,7 +172,7 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
         return <section className="task-group" key={group.id}>
           <button className="group-heading" onClick={() => setOpenGroups(old => old.includes(group.id) ? old.filter(item => item !== group.id) : [...old, group.id])} aria-expanded={expanded}><span className="group-emoji">{group.emoji}</span><span className="group-name"><strong>{group.name}</strong><small>{group.note}</small></span><span className="group-count">{complete}/{groupAll.length}</span><ChevronDown className={expanded ? 'up' : ''} size={18} strokeWidth={1.8} /></button>
           {expanded && <div className="group-rows">{rows.map(row => <div key={row.task.id} className={`task-row ${row.done ? 'done' : ''}`}>
-            <button className="task-toggle" onClick={() => void onToggle(row)} aria-label={`${row.done ? 'Отменить выполнение' : 'Выполнить'}: ${row.task.text}`} aria-pressed={row.done} disabled={saving}><span className="task-check">{row.done && <Check size={16} strokeWidth={2.6} />}</span><span className="task-content"><span className="task-text">{row.task.text}</span>{(row.task.time || row.task.priority === 'high' || row.recurring || row.task.collectionItemId) && <small>{row.task.time && `${row.task.time} · `}{row.task.priority === 'high' && 'Важное · '}{row.recurring && <><Repeat2 size={10} /> {repeatLabels[recurrenceOf(row.task)]}</>}{row.task.collectionItemId && <> · Из коллекции</>}</small>}</span></button>
+            <button className="task-toggle" onClick={() => void onToggle(row)} aria-label={`${row.done ? 'Отменить выполнение' : row.task.kind === 'payment' ? 'Отметить оплату' : 'Выполнить'}: ${row.task.text}`} aria-pressed={row.done} disabled={saving}><span className="task-check">{row.done && <Check size={16} strokeWidth={2.6} />}</span><span className="task-content"><span className="task-text">{row.task.kind === 'payment' && <Wallet size={14} className="payment-inline-icon"/>}{row.task.text}{row.task.payment && <span className="task-payment-amount"> · {paymentLabel(row.task.payment)}</span>}</span>{(row.task.time || row.task.priority === 'high' || row.recurring || row.task.collectionItemId) && <small>{row.task.time && `${row.task.time} · `}{row.task.priority === 'high' && 'Важное · '}{row.recurring && <><Repeat2 size={10} /> {repeatLabels[recurrenceOf(row.task)]}</>}{row.task.collectionItemId && <> · Из списка</>}</small>}</span></button>
             <button className="task-edit" onClick={() => edit(row.task)} aria-label={`Изменить задачу: ${row.task.text}`} disabled={saving}><Pencil size={16} /></button>
           </div>)}</div>}
         </section>
@@ -166,32 +183,33 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
     {storage === 'ready' && mode !== 'day' && <div className="period-list">
       {period.filter(day => day.filtered.length > 0).map(day => <button className="period-day" key={day.date} onClick={() => chooseDate(day.date)}>
         <span className="period-day-date"><strong>{localDate(day.date, { weekday: 'short', day: 'numeric', month: 'short' })}</strong><small>{day.all.filter(row => row.done).length}/{day.all.length} выполнено</small></span>
-        <span className="period-day-tasks">{day.filtered.slice(0, 3).map(row => <span key={row.task.id} className={row.done ? 'is-done' : ''}>{row.done ? '✓' : '○'} {row.task.text}</span>)}{day.filtered.length > 3 && <small>+ ещё {day.filtered.length - 3}</small>}</span><ChevronRight size={17} />
+        <span className="period-day-tasks">{day.filtered.slice(0, 3).map(row => <span key={row.task.id} className={row.done ? 'is-done' : ''}>{row.done ? '✓' : '○'} {row.task.text}{row.task.payment ? ` · ${paymentLabel(row.task.payment)}` : ''}</span>)}{day.filtered.length > 3 && <small>+ ещё {day.filtered.length - 3}</small>}</span><ChevronRight size={17} />
       </button>)}
       {period.every(day => !day.filtered.length) && <div className="empty-day"><CalendarDays size={28} strokeWidth={1.3} /><strong>{totals.count ? 'По фильтру ничего нет' : 'На этот период нет задач'}</strong><span>Нажми «+» и добавь дело на выбранную дату.</span></div>}
     </div>}
-    <button className="add-inline" onClick={add} disabled={storage !== 'ready'}><CirclePlus size={20} strokeWidth={1.6} /><span>Добавить задачу</span><ArrowRight size={18} /></button>
+    <button className="add-inline" onClick={() => add()} disabled={storage !== 'ready'}><CirclePlus size={20} strokeWidth={1.6} /><span>Добавить задачу</span><ArrowRight size={18} /></button>
     {mode === 'day' && <><QuestPanel key={selected} date={selected} today={today} records={questCompletions} ready={storage === 'ready'} savingId={questSavingId} lightEnabled={lightDay(dayModes, selected)} lightSaving={saving} onToggle={onToggleQuest} onToggleLight={onToggleLight}/>
       <TrackerPanel date={selected} trackers={trackers} readings={trackerReadings} ready={storage === 'ready'} saving={saving} onSave={onSaveTracker} onRecord={onRecordTracker}/></>}
-    <button className="floating-add" aria-label="Добавить задачу" onClick={add} disabled={storage !== 'ready'}><Plus size={29} strokeWidth={1.8} /></button>
+    <button className="floating-add" aria-label="Добавить задачу" onClick={() => add()} disabled={storage !== 'ready'}><Plus size={29} strokeWidth={1.8} /></button>
 
-    {managingGroups && <GroupManager groups={groups} tasks={tasks} saving={saving} onSave={onSaveGroup} onClose={() => setManagingGroups(false)} />}
+    {managingGroups && <GroupManager groups={groups} tasks={tasks} saving={saving} onSave={onSaveGroup} onClose={closeGroupManager} />}
 
     {dialog && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !saving) setDialog(false) }}>
       <form className="task-modal" onSubmit={event => void submit(event)}>
         <div className="modal-handle" />
-        <div className="modal-heading"><div><p className="eyebrow">{editing ? 'РЕДАКТИРОВАНИЕ' : 'НОВАЯ ЗАДАЧА'}</p><h2>{editing ? 'Изменить дело' : 'Добавить дело'}</h2></div><button type="button" className="close-button" aria-label="Закрыть" onClick={() => setDialog(false)} disabled={saving}><X size={21} /></button></div>
-        <label className="form-label" htmlFor="task-text">Название</label><input autoFocus id="task-text" required value={draft.text} onChange={event => setDraft(old => ({ ...old, text: event.target.value }))} placeholder="Что нужно сделать?" maxLength={140} />
-        <label className="form-label" htmlFor="task-group">Группа</label><select id="task-group" value={draft.group} onChange={event => setDraft(old => ({ ...old, group: event.target.value }))}>{groups.filter(group => !group.archived || group.id === draft.group).map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select>
-        <div className="form-grid"><div><label className="form-label" htmlFor="task-date">Дата начала</label><input id="task-date" type="date" required value={draft.date} onChange={event => setDraft(old => ({ ...old, date: event.target.value }))} /></div><div><label className="form-label" htmlFor="task-time">Время, если нужно</label><input id="task-time" type="time" value={draft.time} onChange={event => setDraft(old => ({ ...old, time: event.target.value }))} /></div></div>
+        <div className="modal-heading"><div><p className="eyebrow">{draft.kind === 'payment' ? 'КАЛЕНДАРЬ / ПЛАТЁЖ' : editing ? 'РЕДАКТИРОВАНИЕ' : 'НОВАЯ ЗАДАЧА'}</p><h2>{draft.kind === 'payment' ? editing ? 'Изменить платёж' : 'Новый платёж' : editing ? 'Изменить дело' : 'Добавить дело'}</h2></div><button type="button" className="close-button" aria-label="Закрыть" onClick={() => setDialog(false)} disabled={saving}><X size={21} /></button></div>
+        <label className="form-label" htmlFor="task-text">Название</label><input autoFocus id="task-text" required value={draft.text} onChange={event => setDraft(old => ({ ...old, text: event.target.value }))} placeholder={draft.kind === 'payment' ? 'Например, аренда квартиры' : 'Что нужно сделать?'} maxLength={140} />
+        <div className="task-group-label"><label className="form-label" htmlFor="task-group">Группа</label><button type="button" onClick={() => manageGroups(true)}><Settings2 size={14}/> Добавить / удалить</button></div><select id="task-group" value={draft.group} onChange={event => setDraft(old => ({ ...old, group: event.target.value }))}>{groups.filter(group => !group.archived || group.id === draft.group).map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select>
+        {draft.kind === 'payment' && <div className="payment-form-amount"><div><label className="form-label" htmlFor="payment-amount">Сумма</label><input name="payment-amount" id="payment-amount" type="text" inputMode="decimal" required placeholder="Например, 800" value={draft.paymentAmount} onChange={event => setDraft(old => ({ ...old, paymentAmount: event.target.value }))}/></div><div><label className="form-label" htmlFor="payment-currency">Валюта</label><select id="payment-currency" value={draft.paymentCurrency} onChange={event => setDraft(old => ({ ...old, paymentCurrency: event.target.value as PaymentCurrency }))}><option value="USD">USD · $</option><option value="GEL">GEL · ₾</option><option value="RUB">RUB · ₽</option></select></div></div>}
+        <div className="form-grid"><div><label className="form-label" htmlFor="task-date">Дата начала</label><input name="task-date" id="task-date" type="date" required value={draft.date} onChange={event => setDraft(old => ({ ...old, date: event.target.value }))} /></div><div><label className="form-label" htmlFor="task-time">Время, если нужно</label><input name="task-time" id="task-time" type="time" value={draft.time} onChange={event => setDraft(old => ({ ...old, time: event.target.value }))} /></div></div>
         <label className="form-label" htmlFor="task-repeat">Повторение</label><select id="task-repeat" value={draft.repeat} disabled={!!editing?.collectionItemId} onChange={event => setDraft(old => ({ ...old, repeat: event.target.value as RepeatRule, repeatUntil: '' }))}>{(Object.keys(repeatLabels) as RepeatRule[]).map(rule => <option key={rule} value={rule}>{repeatLabels[rule]}</option>)}</select>
         {editing?.collectionItemId && <p className="repeat-help">Эта задача связана с коллекцией. Повторы отключены, чтобы пункт не засчитывался несколько раз.</p>}
-        {draft.repeat !== 'none' && <><label className="form-label" htmlFor="task-repeat-until">Повторять до (необязательно)</label><input id="task-repeat-until" type="date" min={draft.date} value={draft.repeatUntil} onChange={event => setDraft(old => ({ ...old, repeatUntil: event.target.value }))}/><p className="repeat-help">У каждого дня собственная отметка выполнения. Изменение параметров меняет всю серию.</p></>}
+        {draft.repeat !== 'none' && <><label className="form-label" htmlFor="task-repeat-until">Повторять до (необязательно)</label><input name="task-repeat-until" id="task-repeat-until" type="date" min={draft.date} value={draft.repeatUntil} onChange={event => setDraft(old => ({ ...old, repeatUntil: event.target.value }))}/><p className="repeat-help">{draft.kind === 'payment' ? 'Для аренды 10-го числа выбери дату начала 10-го и «Раз в месяц». В коротких месяцах 29–31 число переносится на последний день.' : 'У каждого дня собственная отметка выполнения. Изменение параметров меняет всю серию.'}</p></>}
         <label className="form-label" htmlFor="task-priority">Приоритет</label><select id="task-priority" value={draft.priority} onChange={event => setDraft(old => ({ ...old, priority: event.target.value as TaskPriority }))}><option value="normal">Обычный</option><option value="high">Важный</option><option value="low">Невысокий</option></select>
         <label className="form-label" htmlFor="task-notes">Заметка, если нужна</label><textarea id="task-notes" rows={2} maxLength={4000} value={draft.notes} onChange={event => setDraft(old => ({ ...old, notes: event.target.value }))} placeholder="Детали, адрес, напоминание…" />
-        <div className="modal-date"><Clock3 size={16} /> Без времени — полноценная задача</div>
+        <div className="modal-date"><Clock3 size={16} /> {draft.kind === 'payment' ? 'Время необязательно. Это запись в календаре, не банковский автоплатёж и не push-уведомление.' : 'Без времени — полноценная задача'}</div>
         {modalError && <p className="form-error" role="alert">{modalError}</p>}
-        <button className="submit-task" type="submit" disabled={!draft.text.trim() || !draft.date || (draft.repeatUntil !== '' && draft.repeatUntil < draft.date) || saving}>{saving ? 'Сохраняем…' : editing ? 'Сохранить изменения' : 'Добавить задачу'} <ArrowRight size={18} /></button>
+        <button className="submit-task" type="submit" disabled={!draft.text.trim() || !draft.date || (draft.repeatUntil !== '' && draft.repeatUntil < draft.date) || (draft.kind === 'payment' && !draft.paymentAmount.trim()) || saving}>{saving ? 'Сохраняем…' : editing ? 'Сохранить изменения' : draft.kind === 'payment' ? 'Добавить платёж' : 'Добавить задачу'} <ArrowRight size={18} /></button>
         {editing && <div className="delete-zone">{confirmDelete ? <><span>{recurrenceOf(editing) === 'none' ? 'Переместить задачу в корзину?' : 'Переместить всю серию в корзину?'}</span><button type="button" className="delete-confirm" onClick={() => void remove()} disabled={saving}>Да, удалить</button><button type="button" onClick={() => setConfirmDelete(false)}>Отмена</button></> : <button type="button" onClick={() => setConfirmDelete(true)}><Trash2 size={15} /> {recurrenceOf(editing) === 'none' ? 'Удалить задачу' : 'Удалить серию'}</button>}</div>}
       </form>
     </div>}

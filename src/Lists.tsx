@@ -1,17 +1,21 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CalendarPlus, Check, ChevronRight, CirclePlus, Pencil, Plus, RotateCcw, SlidersHorizontal, Trash2, X } from 'lucide-react'
-import { collectionProgress, linkedTask, type CollectionItem, type ListEntry } from './collections'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CalendarPlus, ChevronRight, CirclePlus, Pencil, Plus, RotateCcw, SlidersHorizontal, Trash2, X } from 'lucide-react'
+import { displayCollectionName, displayCollectionNote, linkedTask, orderedCollections, type CollectionItem, type ListEntry } from './collections'
 import { localDate, type GroupItem, type TaskItem } from './demo'
 
 export type CollectionDraft = { name: string; emoji: string; note: string; archived?: boolean }
 export type EntryDraft = { collectionId: string; text: string; note: string; tags: string[] }
-type ListFilter = 'all' | 'open' | 'done'
 
 function tidyTags(input: string) {
   return [...new Set(input.split(',').map(tag => tag.trim().replace(/^#/, '')).filter(Boolean))].slice(0, 12)
 }
+function pointsLabel(count: number) {
+  const remainder = count % 100
+  const last = count % 10
+  return `${count} ${remainder >= 11 && remainder <= 14 ? 'пунктов' : last === 1 ? 'пункт' : last >= 2 && last <= 4 ? 'пункта' : 'пунктов'}`
+}
 
-export default function Lists({ collections, entries, tasks, groups, today, ready, saving, onSaveCollection, onSaveEntry, onToggleEntry, onDeleteEntry, onRestoreEntry, onMoveEntry, onPlanEntry }: {
+export default function Lists({ collections, entries, tasks, groups, today, ready, saving, onSaveCollection, onSaveEntry, onDeleteEntry, onRestoreEntry, onMoveEntry, onPlanEntry }: {
   collections: CollectionItem[]
   entries: ListEntry[]
   tasks: TaskItem[]
@@ -21,14 +25,12 @@ export default function Lists({ collections, entries, tasks, groups, today, read
   saving: boolean
   onSaveCollection: (draft: CollectionDraft, existing?: CollectionItem) => Promise<void>
   onSaveEntry: (draft: EntryDraft, existing?: ListEntry) => Promise<void>
-  onToggleEntry: (entry: ListEntry) => Promise<void>
   onDeleteEntry: (entry: ListEntry) => Promise<void>
   onRestoreEntry: (entry: ListEntry) => Promise<void>
   onMoveEntry: (entry: ListEntry, other: ListEntry) => Promise<void>
   onPlanEntry: (entry: ListEntry, date: string, groupId: string) => Promise<void>
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [filter, setFilter] = useState<ListFilter>('all')
   const [tag, setTag] = useState('all')
   const [showArchived, setShowArchived] = useState(false)
   const [showDeleted, setShowDeleted] = useState(false)
@@ -46,23 +48,19 @@ export default function Lists({ collections, entries, tasks, groups, today, read
   const [planGroup, setPlanGroup] = useState('personal')
   const [modalError, setModalError] = useState('')
 
-  const activeCollections = collections.filter(collection => !collection.archived)
+  const activeCollections = orderedCollections(collections.filter(collection => !collection.archived))
   const archivedCollections = collections.filter(collection => collection.archived)
   const selected = collections.find(collection => collection.id === selectedId && !collection.archived) ?? null
   const currentEntries = useMemo(() => entries.filter(entry => entry.collectionId === selectedId && !entry.deletedAt).sort((a, b) => a.order - b.order || a.createdAt.localeCompare(b.createdAt)), [entries, selectedId])
   const deletedEntries = entries.filter(entry => entry.collectionId === selectedId && entry.deletedAt)
   const allTags = [...new Set(currentEntries.flatMap(entry => entry.tags))].sort((a, b) => a.localeCompare(b, 'ru'))
-  const shown = currentEntries.filter(entry => (filter === 'all' || entry.done === (filter === 'done')) && (tag === 'all' || entry.tags.includes(tag)))
-  const currentProgress = selected ? collectionProgress(entries, selected.id) : { done: 0, total: 0, percent: 0 }
-  const summary = activeCollections.reduce((total, collection) => {
-    const progress = collectionProgress(entries, collection.id)
-    return { done: total.done + progress.done, total: total.total + progress.total }
-  }, { done: 0, total: 0 })
+  const shown = currentEntries.filter(entry => tag === 'all' || entry.tags.includes(tag))
+  const summaryCount = entries.filter(entry => !entry.deletedAt && activeCollections.some(collection => collection.id === entry.collectionId)).length
 
-  function openCollection(collection: CollectionItem) { setSelectedId(collection.id); setFilter('all'); setTag('all'); setShowDeleted(false) }
+  function openCollection(collection: CollectionItem) { setSelectedId(collection.id); setTag('all'); setShowDeleted(false) }
   function openCollectionEditor(collection?: CollectionItem) {
     setEditingCollection(collection)
-    setCollectionDraft(collection ? { name: collection.name, emoji: collection.emoji, note: collection.note, archived: collection.archived } : { name: '', emoji: '✳', note: '' })
+    setCollectionDraft(collection ? { name: displayCollectionName(collection), emoji: collection.emoji, note: displayCollectionNote(collection), archived: collection.archived } : { name: '', emoji: '✳', note: '' })
     setConfirmArchive(false); setModalError(''); setCollectionDialog(true)
   }
   function openEntryEditor(entry?: ListEntry) {
@@ -106,31 +104,31 @@ export default function Lists({ collections, entries, tasks, groups, today, read
 
   return <div className="page lists-page">
     {!selected ? <>
-      <div className="lists-header"><div><p className="eyebrow">BASE <span className="eyebrow-dot">/</span> МОИ КОЛЛЕКЦИИ</p><h1>Списки<span className="mint-period">.</span></h1><p className="lead">Книги, фильмы, места и идеи. Без дедлайнов.</p></div><button className="square-action" aria-label="Создать коллекцию" title="Новая коллекция" disabled={!ready || saving} onClick={() => openCollectionEditor()}><Plus size={21} /></button></div>
-      <section className="lists-summary"><span className="caps-label">ТВОЯ КОЛЛЕКЦИЯ ВПЕЧАТЛЕНИЙ</span><div><strong>{summary.done}<span> / {summary.total}</span></strong><small>{activeCollections.length} коллекций</small></div><div className="progress-track" role="progressbar" aria-valuenow={summary.done} aria-valuemin={0} aria-valuemax={summary.total || 1}><div className="progress-fill" style={{ width: `${summary.total ? Math.round(summary.done / summary.total * 100) : 0}%` }}/></div></section>
+      <div className="lists-header"><div><p className="eyebrow">BASE <span className="eyebrow-dot">/</span> МОИ СПИСКИ</p><h1>Списки<span className="mint-period">.</span></h1><p className="lead">Покупки, книги, фильмы и идеи. Без счётчиков выполнения.</p></div><button className="square-action" aria-label="Создать список" title="Новый список" disabled={!ready || saving} onClick={() => openCollectionEditor()}><Plus size={21} /></button></div>
+      <section className="lists-summary lists-summary-simple"><span className="caps-label">ВСЁ В ОДНОМ МЕСТЕ</span><div><strong>{pointsLabel(summaryCount)}</strong><small>{activeCollections.length} списков</small></div></section>
       {!ready && <div className="lists-empty">Загружаем коллекции…</div>}
       {ready && <div className="collection-grid">{activeCollections.map(collection => {
-        const progress = collectionProgress(entries, collection.id)
-        return <button className="collection-card" key={collection.id} onClick={() => openCollection(collection)}>
+        const count = entries.filter(entry => entry.collectionId === collection.id && !entry.deletedAt).length
+        return <button className={`collection-card${collection.id === 'shopping' ? ' collection-card-shopping' : ''}`} key={collection.id} onClick={() => openCollection(collection)}>
           <div className="collection-card-top"><span className="collection-symbol" aria-hidden="true">{collection.emoji}</span><ChevronRight size={18} /></div>
-          <strong>{collection.name}</strong><small>{collection.note}</small>
-          <div className="collection-card-bottom"><span>{progress.done} / {progress.total}</span><span>{progress.percent}%</span></div><div className="progress-track"><div className="progress-fill" style={{ width: `${progress.percent}%` }}/></div>
+          <strong>{displayCollectionName(collection)}</strong><small>{displayCollectionNote(collection)}</small>
+          <div className="collection-card-bottom"><span>{pointsLabel(count)}</span><span>Открыть ↗</span></div>
         </button>
       })}</div>}
-      <button className="lists-add-collection" disabled={!ready || saving} onClick={() => openCollectionEditor()}><CirclePlus size={20} /> Новая коллекция <ArrowRight size={17} /></button>
+      <button className="lists-add-collection" disabled={!ready || saving} onClick={() => openCollectionEditor()}><CirclePlus size={20} /> Новый список <ArrowRight size={17} /></button>
       {!!archivedCollections.length && <div className="lists-archived"><button className="lists-subtle-button" onClick={() => setShowArchived(!showArchived)}>{showArchived ? 'Скрыть архив' : `Архив коллекций · ${archivedCollections.length}`}</button>{showArchived && archivedCollections.map(collection => <div className="archived-collection" key={collection.id}><span>{collection.emoji} {collection.name}</span><button disabled={saving} onClick={() => void onSaveCollection({ name: collection.name, emoji: collection.emoji, note: collection.note, archived: false }, collection)}>Вернуть</button></div>)}</div>}
     </> : <>
-      <button className="lists-back" onClick={() => setSelectedId(null)}><ArrowLeft size={18} /> Все коллекции</button>
-      <div className="list-detail-heading"><span className="list-detail-emoji" aria-hidden="true">{selected.emoji}</span><button aria-label={`Изменить коллекцию ${selected.name}`} className="square-action" onClick={() => openCollectionEditor(selected)} disabled={saving}><Pencil size={17} /></button></div>
-      <p className="eyebrow">КОЛЛЕКЦИЯ / {String(collections.indexOf(selected) + 1).padStart(2, '0')}</p><h1 className="list-detail-name">{selected.name}<span className="mint-period">.</span></h1><p className="lead">{selected.note || 'Твои идеи и желания'}</p>
-      <section className="list-detail-progress"><div><span className="caps-label">ВЫПОЛНЕНО</span><strong>{currentProgress.done} <span>из {currentProgress.total}</span></strong></div><strong className="progress-percent">{currentProgress.percent}%</strong><div className="progress-track"><div className="progress-fill" style={{ width: `${currentProgress.percent}%` }} /></div></section>
-      <div className="list-filters"><div className="filter-pills">{([{ id: 'all', text: 'Все' }, { id: 'open', text: 'В планах' }, { id: 'done', text: 'Готово' }] as { id: ListFilter; text: string }[]).map(item => <button key={item.id} className={filter === item.id ? 'active' : ''} onClick={() => setFilter(item.id)}>{item.text}</button>)}</div>{!!allTags.length && <div className="list-tag-filter"><SlidersHorizontal size={15} /><select value={tag} aria-label="Фильтр по тегу" onChange={event => setTag(event.target.value)}><option value="all">Все теги</option>{allTags.map(value => <option key={value} value={value}>#{value}</option>)}</select></div>}</div>
+      <button className="lists-back" onClick={() => setSelectedId(null)}><ArrowLeft size={18} /> Все списки</button>
+      <div className="list-detail-heading"><span className="list-detail-emoji" aria-hidden="true">{selected.emoji}</span><button aria-label={`Изменить список ${displayCollectionName(selected)}`} className="square-action" onClick={() => openCollectionEditor(selected)} disabled={saving}><Pencil size={17} /></button></div>
+      <p className="eyebrow">СПИСОК / {String(activeCollections.indexOf(selected) + 1).padStart(2, '0')}</p><h1 className="list-detail-name">{displayCollectionName(selected)}<span className="mint-period">.</span></h1><p className="lead">{displayCollectionNote(selected) || 'Твои идеи и желания'}</p>
+      <div className="list-plain-count">{pointsLabel(currentEntries.length)} · без сроков и отметок выполнения</div>
+      {!!allTags.length && <div className="list-filters"><div className="list-tag-filter"><SlidersHorizontal size={15} /><select value={tag} aria-label="Фильтр по тегу" onChange={event => setTag(event.target.value)}><option value="all">Все теги</option>{allTags.map(value => <option key={value} value={value}>#{value}</option>)}</select></div></div>}
       <div className="collection-entry-list">{shown.map(entry => {
         const linked = linkedTask(tasks, entry.id)
         const index = currentEntries.findIndex(item => item.id === entry.id)
-        return <article className={`collection-entry ${entry.done ? 'is-done' : ''}`} key={entry.id}>
-          <div className="collection-entry-main"><button className="entry-check" disabled={saving} aria-pressed={entry.done} aria-label={`${entry.done ? 'Отменить' : 'Выполнить'}: ${entry.text}`} onClick={() => void onToggleEntry(entry)}>{entry.done && <Check size={17} strokeWidth={2.5} />}</button><div className="entry-content"><strong>{entry.text}</strong>{!!entry.note && <p>{entry.note}</p>}{!!entry.tags.length && <div className="entry-tags">{entry.tags.map(value => <span key={value}>#{value}</span>)}</div>}{linked && <span className="entry-linked">{linked.done ? '✓ Выполнено в планере' : `◷ В плане · ${localDate(linked.date, { day: 'numeric', month: 'short' })}`}</span>}</div><button className="entry-edit" onClick={() => openEntryEditor(entry)} aria-label={`Изменить ${entry.text}`} disabled={saving}><Pencil size={16} /></button></div>
-          <div className="collection-entry-actions"><button onClick={() => openPlan(entry)} disabled={saving || entry.done}><CalendarPlus size={15} /> {linked ? 'Перенести' : 'В план'}</button><div className="entry-reorder"><button aria-label={`Выше: ${entry.text}`} disabled={saving || index === 0} onClick={() => void onMoveEntry(entry, currentEntries[index - 1])}><ArrowUp size={15} /></button><button aria-label={`Ниже: ${entry.text}`} disabled={saving || index === currentEntries.length - 1} onClick={() => void onMoveEntry(entry, currentEntries[index + 1])}><ArrowDown size={15} /></button></div></div>
+        return <article className="collection-entry" key={entry.id}>
+          <div className="collection-entry-main"><div className="entry-content"><strong>{entry.text}</strong>{!!entry.note && <p>{entry.note}</p>}{!!entry.tags.length && <div className="entry-tags">{entry.tags.map(value => <span key={value}>#{value}</span>)}</div>}{linked && <span className="entry-linked">{`В календаре · ${localDate(linked.date, { day: 'numeric', month: 'short' })}`}</span>}</div><button className="entry-edit" onClick={() => openEntryEditor(entry)} aria-label={`Изменить ${entry.text}`} disabled={saving}><Pencil size={16} /></button></div>
+          <div className="collection-entry-actions"><button onClick={() => openPlan(entry)} disabled={saving}><CalendarPlus size={15} /> {linked ? 'Изменить дату' : 'В календарь'}</button><div className="entry-reorder"><button aria-label={`Выше: ${entry.text}`} disabled={saving || index === 0} onClick={() => void onMoveEntry(entry, currentEntries[index - 1])}><ArrowUp size={15} /></button><button aria-label={`Ниже: ${entry.text}`} disabled={saving || index === currentEntries.length - 1} onClick={() => void onMoveEntry(entry, currentEntries[index + 1])}><ArrowDown size={15} /></button></div></div>
         </article>
       })}</div>
       {shown.length === 0 && <div className="lists-empty"><span>✳</span><strong>{currentEntries.length ? 'По фильтру ничего нет' : 'Здесь пока пусто'}</strong><small>{currentEntries.length ? 'Попробуй другой фильтр.' : 'Добавь первую книгу, фильм или идею.'}</small></div>}
@@ -160,7 +158,7 @@ export default function Lists({ collections, entries, tasks, groups, today, read
       <label className="form-label" htmlFor="collection-plan-group">Группа планера</label><select id="collection-plan-group" value={planGroup} onChange={event => setPlanGroup(event.target.value)}>{groups.filter(group => !group.archived || group.id === planGroup).map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select>
       <p className="list-plan-hint">Создаётся одна связанная задача. Если она уже есть, мы перенесём её, не создавая дубль. Выполнение в планере обновит эту коллекцию.</p>
       {!!modalError && <p className="form-error" role="alert">{modalError}</p>}
-      <button className="submit-task" disabled={saving || !planDate || !planGroup || planEntry.done}>{saving ? 'Сохраняем…' : 'Сохранить в планере'} <ArrowRight size={17}/></button>
+      <button className="submit-task" disabled={saving || !planDate || !planGroup}>{saving ? 'Сохраняем…' : 'Сохранить в планере'} <ArrowRight size={17}/></button>
     </form></div>}
   </div>
 }
