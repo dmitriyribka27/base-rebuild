@@ -4,8 +4,11 @@ import { CHARACTERISTICS, MAX_DAILY_XP, PROGRAM_END, PROGRAM_START, XP_PER_LEVEL
 import { achievements } from './achievements'
 import type { DailyReport } from './journal'
 import type { DayMode, TrackerReading } from './trackers'
+import type { TrackerDefinition } from './trackers'
+import type { JournalEntry } from './journal'
+import TrackerInsights from './TrackerInsights'
 
-export default function Progress({ today, records, reports, readings, dayModes, ready }: { today: string; records: QuestCompletion[]; reports: DailyReport[]; readings: TrackerReading[]; dayModes: DayMode[]; ready: boolean }) {
+export default function Progress({ today, records, reports, trackers, readings, journals, dayModes, ready }: { today: string; records: QuestCompletion[]; reports: DailyReport[]; trackers: TrackerDefinition[]; readings: TrackerReading[]; journals: JournalEntry[]; dayModes: DayMode[]; ready: boolean }) {
   const xp = experience(records)
   const day = programDay(today)
   const todayXp = dailyQuestXp(records, today)
@@ -23,6 +26,7 @@ export default function Progress({ today, records, reports, readings, dayModes, 
     <section className="rpg-characteristics"><h2>Шесть характеристик</h2><p>Каждая получает опыт только за связанные с ней квесты.</p>
       {CHARACTERISTICS.map(stat => <div className="rpg-characteristic" key={stat.id}><div className="rpg-stat-top"><span className="rpg-stat-icon">{stat.symbol}</span><span className="rpg-stat-name"><strong>{stat.name}</strong><small>{stat.description}</small></span><b>{xp.byCharacteristic[stat.id]} XP</b></div><div className="rpg-stat-track"><div style={{width:`${xp.byCharacteristic[stat.id] / maxStat * 100}%`}}/></div></div>)}
     </section>
+    {ready && <TrackerInsights today={today} trackers={trackers} readings={readings} journals={journals}/>}
     <section className="rpg-achievements"><h2>Достижения</h2><p>{ready ? `${unlocked} из ${badges.length} открыто` : 'Загружаем достижения…'} · Без дополнительных XP и вымышленных результатов.</p>
       <div className="achievement-grid">{badges.map(badge => <div key={badge.id} className={`achievement-item${badge.unlocked ? '' : ' locked'}`}><span className="achievement-icon" aria-hidden="true">{badge.unlocked ? badge.icon : '○'}</span><strong>{badge.name}</strong><small>{badge.description}</small><em>{badge.unlocked ? 'Открыто' : 'Пока закрыто'}</em></div>)}</div>
     </section>

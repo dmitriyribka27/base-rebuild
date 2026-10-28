@@ -13,6 +13,8 @@ const { emptyJournal, makeDailyReport, sleepHours } = await importTypeScript('sr
 const { QUESTS, MAX_DAILY_XP, XP_PER_LEVEL, questRecordId, dailyQuestXp, completedQuestCount, hasCompletedQuest, experience, programDay } = await importTypeScript('src/rpg.ts')
 const { trackerReadingId, readingsForReport, lightDay, recordedDays } = await importTypeScript('src/trackers.ts')
 const { achievements } = await importTypeScript('src/achievements.ts')
+const { insightDates, shiftInsightPeriod, trackerInsight, journalInsight } = await importTypeScript('src/insights.ts')
+const { JournalWriteQueue } = await importTypeScript('src/journalQueue.ts')
 
 const date = '2026-10-29'
 const task = (repeat, overrides = {}) => ({
@@ -190,4 +192,45 @@ assert.equal(badges.filter(badge => badge.unlocked).length, 4)
 assert.equal(badges.find(badge => badge.id === 'firstReport').unlocked, false)
 assert.equal(achievements({ quests: [], reports: [], readings: [], dayModes: [] }).filter(badge => badge.unlocked).length, 0)
 
-console.log('PASS: recurrence, collection links, RPG quests/levels, journal/report accuracy, task moves, tracker zero/false/light days, achievements, JSON v1-v6 migration and invalid data')
+// 1.0 analytics never turns unrecorded days into zeros. Boolean false and numeric zero count.
+const insightWeek = insightDates(date, 'week')
+assert.deepEqual(insightWeek, ['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01'])
+assert.equal(insightDates('2028-02-10', 'month').length, 29)
+assert.equal(shiftInsightPeriod('2026-01-31', 'month', 1), '2026-02-28')
+assert.equal(shiftInsightPeriod('2027-02-28', 'month', -1), '2027-01-28')
+assert.equal(shiftInsightPeriod('2026-12-30', 'week', 1), '2027-01-06')
+const boolStats = trackerInsight(definitions[0], readings, insightWeek)
+assert.equal(boolStats.count, 1)
+assert.equal(boolStats.noCount, 1)
+assert.equal(boolStats.yesCount, 0)
+assert.equal(boolStats.points.find(point => point.date === date).value, false)
+assert.equal(boolStats.points.find(point => point.date === '2026-10-28').value, null)
+const numberStats = trackerInsight(definitions[1], readings, insightWeek)
+assert.equal(numberStats.count, 1)
+assert.equal(numberStats.average, 0)
+assert.equal(numberStats.minimum, 0)
+assert.equal(numberStats.maximum, 0)
+assert.equal(trackerInsight(definitions[1], [], insightWeek).average, null)
+const journalStats = journalInsight([journal], insightWeek)
+assert.equal(journalStats.energy.average, 2)
+assert.equal(journalStats.mood.average, 6)
+assert.equal(journalStats.sleep.average, 6)
+assert.equal(journalStats.cigarettes.count, 1)
+assert.equal(journalStats.cigarettes.average, 0)
+assert.equal(journalInsight([], insightWeek).cigarettes.average, null)
+
+// Repeated typing keeps the newest snapshot, never an older queued write.
+const written = []
+let releaseFirst
+const writer = new JournalWriteQueue(async entry => {
+  written.push(entry.thoughts)
+  if (written.length === 1) await new Promise(resolve => { releaseFirst = resolve })
+}, () => assert.fail('Unexpected journal write failure'))
+writer.enqueue({ ...journal, thoughts: 'a' })
+writer.enqueue({ ...journal, thoughts: 'ab' })
+writer.enqueue({ ...journal, thoughts: 'abc' })
+releaseFirst()
+await writer.whenIdle()
+assert.deepEqual(written, ['a', 'abc'])
+
+console.log('PASS: recurrence, collection links, RPG, journal/report accuracy, moves, tracker stats, journal write coalescing, achievements, JSON v1-v6 migration and invalid data')

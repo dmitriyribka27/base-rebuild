@@ -7,6 +7,7 @@ import {
 import { dateKey, defaultGroups, localDate, type GroupItem, type OccurrenceItem, type TaskItem } from './demo'
 import { defaultCollections, linkedTask, setEntryDone, setTaskDone, type CollectionItem, type ListEntry } from './collections'
 import { sleepHours, type DailyReport, type JournalEntry, type TaskMove } from './journal'
+import { JournalWriteQueue } from './journalQueue'
 import { XP_PER_LEVEL, QUESTS, experience, questRecordId, type QuestCompletion, type QuestId } from './rpg'
 import { trackerReadingId, lightDay, type DayMode, type TrackerDefinition, type TrackerReading } from './trackers'
 import { occurrenceId, recurrenceOf, scheduledForDate, type ScheduledTask } from './schedule'
@@ -89,6 +90,7 @@ export default function App() {
   const [pendingImport, setPendingImport] = useState<AppData | null>(null)
   const [importError, setImportError] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
+  const journalWriter = useRef<JournalWriteQueue | null>(null)
 
   useEffect(() => {
     let active = true
@@ -112,7 +114,7 @@ export default function App() {
     const refresh = () => {
       if (document.visibilityState !== 'visible') return
       setToday(dateKey(new Date()))
-      readAllData().then(apply).catch(() => { if (active) { setStorage('error'); setStorageError('Не удалось перечитать записи.') } })
+      void (async () => { await journalWriter.current?.whenIdle(); return readAllData() })().then(apply).catch(() => { if (active) { setStorage('error'); setStorageError('Не удалось перечитать записи.') } })
     }
     document.addEventListener('visibilitychange', refresh)
     return () => { active = false; document.removeEventListener('visibilitychange', refresh) }
@@ -339,9 +341,10 @@ export default function App() {
 
   function updateJournal(entry: JournalEntry) {
     if (storage !== 'ready') return
-    // The state updates immediately; each IndexedDB put overwrites this date, not a new row.
+    // Preserve immediate UI feedback while coalescing fast consecutive edits into ordered writes.
     setJournals(old => [...old.filter(item => item.date !== entry.date), entry])
-    void writeJournal(entry).catch(() => setNotice('Не удалось сохранить дневник. Сделай резервную копию и попробуй снова.'))
+    if (!journalWriter.current) journalWriter.current = new JournalWriteQueue(writeJournal, () => setNotice('Не удалось сохранить дневник. Сделай резервную копию и попробуй снова.'))
+    journalWriter.current.enqueue(entry)
   }
 
   async function saveReport(date: string, comment: string) {
@@ -449,6 +452,7 @@ export default function App() {
     if (!pendingImport || saving) return
     setSaving(true)
     try {
+      await journalWriter.current?.whenIdle()
       await replaceAllData(pendingImport)
       setTasks(pendingImport.tasks); setGroups(pendingImport.groups); setOccurrences(pendingImport.occurrences)
       setCollections(pendingImport.collections); setCollectionEntries(pendingImport.collectionEntries)
@@ -463,14 +467,14 @@ export default function App() {
 
   const deleted = tasks.filter(task => task.deletedAt)
   return <div className="app-shell">
-    <header className="app-header"><button className="brand" onClick={() => setTab('home')} aria-label="BASE: REBUILD, перейти домой"><span className="brand-mark">B<span>·</span></span><span className="brand-words">BASE<span>REBUILD / 0.9</span></span></button><div className="header-right"><span className="demo-chip"><i /> {storage === 'ready' ? 'ЛОКАЛЬНО' : storage === 'loading' ? 'ЗАГРУЗКА' : 'ОШИБКА'}</span><button className="header-settings" onClick={() => setInfoOpen(true)} aria-label="Данные и резервные копии"><Settings2 size={19} strokeWidth={1.7} /></button></div></header>
+    <header className="app-header"><button className="brand" onClick={() => setTab('home')} aria-label="BASE: REBUILD, перейти домой"><span className="brand-mark">B<span>·</span></span><span className="brand-words">BASE<span>REBUILD / 1.0</span></span></button><div className="header-right"><span className="demo-chip"><i /> {storage === 'ready' ? 'ЛОКАЛЬНО' : storage === 'loading' ? 'ЗАГРУЗКА' : 'ОШИБКА'}</span><button className="header-settings" onClick={() => setInfoOpen(true)} aria-label="Данные и резервные копии"><Settings2 size={19} strokeWidth={1.7} /></button></div></header>
     {storage === 'error' && <div className="storage-alert" role="alert"><strong>Данные недоступны</strong><span>{storageError} Новые задачи не будут записываться.</span></div>}
-    <main className="app-main">{tab === 'home' ? <Home today={today} tasks={tasks} occurrences={occurrences} journals={journals} questCompletions={questCompletions} ready={storage === 'ready'} onToday={() => setTab('today')} onJournal={() => setTab('journal')} /> : tab === 'today' ? <Planner today={today} tasks={tasks} groups={groups} occurrences={occurrences} questCompletions={questCompletions} questSavingId={questSavingId} onToggleQuest={toggleQuest} dayModes={dayModes} onToggleLight={toggleLight} trackers={trackers} trackerReadings={trackerReadings} onSaveTracker={saveTracker} onRecordTracker={recordTracker} storage={storage} saving={saving} onSave={save} onToggle={toggle} onDelete={remove} onSaveGroup={saveGroup} /> : tab === 'lists' ? <Lists collections={collections} entries={collectionEntries} tasks={tasks} groups={groups} today={today} ready={storage === 'ready'} saving={saving} onSaveCollection={saveCollection} onSaveEntry={saveEntry} onToggleEntry={toggleEntry} onDeleteEntry={deleteEntry} onRestoreEntry={restoreEntry} onMoveEntry={moveEntry} onPlanEntry={planEntry} /> : tab === 'journal' ? <Journal today={today} ready={storage === 'ready'} journals={journals} reports={dailyReports} taskMoves={taskMoves} questCompletions={questCompletions} trackers={trackers} trackerReadings={trackerReadings} dayModes={dayModes} tasks={tasks} groups={groups} occurrences={occurrences} onUpdate={updateJournal} onSaveReport={saveReport} /> : <Progress today={today} records={questCompletions} reports={dailyReports} readings={trackerReadings} dayModes={dayModes} ready={storage === 'ready'}/>}</main>
+    <main className="app-main">{tab === 'home' ? <Home today={today} tasks={tasks} occurrences={occurrences} journals={journals} questCompletions={questCompletions} ready={storage === 'ready'} onToday={() => setTab('today')} onJournal={() => setTab('journal')} /> : tab === 'today' ? <Planner today={today} tasks={tasks} groups={groups} occurrences={occurrences} questCompletions={questCompletions} questSavingId={questSavingId} onToggleQuest={toggleQuest} dayModes={dayModes} onToggleLight={toggleLight} trackers={trackers} trackerReadings={trackerReadings} onSaveTracker={saveTracker} onRecordTracker={recordTracker} storage={storage} saving={saving} onSave={save} onToggle={toggle} onDelete={remove} onSaveGroup={saveGroup} /> : tab === 'lists' ? <Lists collections={collections} entries={collectionEntries} tasks={tasks} groups={groups} today={today} ready={storage === 'ready'} saving={saving} onSaveCollection={saveCollection} onSaveEntry={saveEntry} onToggleEntry={toggleEntry} onDeleteEntry={deleteEntry} onRestoreEntry={restoreEntry} onMoveEntry={moveEntry} onPlanEntry={planEntry} /> : tab === 'journal' ? <Journal today={today} ready={storage === 'ready'} journals={journals} reports={dailyReports} taskMoves={taskMoves} questCompletions={questCompletions} trackers={trackers} trackerReadings={trackerReadings} dayModes={dayModes} tasks={tasks} groups={groups} occurrences={occurrences} onUpdate={updateJournal} onSaveReport={saveReport} /> : <Progress today={today} records={questCompletions} reports={dailyReports} trackers={trackers} readings={trackerReadings} journals={journals} dayModes={dayModes} ready={storage === 'ready'}/>}</main>
     <nav className="bottom-nav" aria-label="Основная навигация">{nav.map(({ id, name, Icon }) => <button key={id} className={tab === id ? 'current' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}><Icon size={21} strokeWidth={tab === id ? 2 : 1.7} /><span>{name}</span>{tab === id && <i />}</button>)}</nav>
     {!!notice && <div className="app-notice" role="status"><span>{notice}</span><button aria-label="Закрыть уведомление" onClick={() => setNotice('')}><X size={16} /></button></div>}
     {infoOpen && <div className="modal-backdrop info-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !saving) setInfoOpen(false) }}>
       <div className="info-dialog data-dialog"><button aria-label="Закрыть" className="close-button" onClick={() => setInfoOpen(false)} disabled={saving}><X size={22} /></button>
-        <span className="info-icon"><ShieldCheck size={31} /></span><h2>Данные BASE v0.9</h2>
+        <span className="info-icon"><ShieldCheck size={31} /></span><h2>Данные BASE v1.0</h2>
         <p>Задачи, коллекции, дневник, RPG-квесты, трекеры и история отчётов сохраняются в IndexedDB на этом устройстве. Они остаются после перезагрузки, но не синхронизируются с другими устройствами или ChatGPT. Очистка данных Safari может их удалить.</p>
         <div className="data-status"><span>Активных задач и серий</span><strong>{tasks.filter(task => !task.deletedAt).length}</strong></div>
         <div className="data-status"><span>Пунктов в коллекциях</span><strong>{collectionEntries.filter(entry => !entry.deletedAt).length}</strong></div>
