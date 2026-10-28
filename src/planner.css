@@ -79,10 +79,4 @@
 .upcoming-payments-empty{margin:12px 0 0;color:#8eafe0;font-size:11px}
 .task-payment-amount{font-weight:760;color:#95d4ff}
 .payment-inline-icon{vertical-align:-2px;margin-right:6px;color:#85caff}
-.sample-task-prompt{margin:10px 0 16px;padding:13px 14px;border:1px dashed rgba(102,171,255,.55);border-radius:15px;background:#0a1e43;display:flex;flex-direction:column;gap:11px}
-.sample-task-prompt>div{display:flex;align-items:flex-start;gap:9px;color:#b5d3f8;font-size:11px;line-height:1.6}
-.sample-task-prompt>div svg{flex:0 0 auto;color:#85c9ff;margin-top:1px}
-.sample-task-prompt>button{align-self:flex-start;border:1px solid #458ce9;background:#173e80;color:#e8f5ff;border-radius:10px;padding:10px 13px;font-size:12px;font-weight:720}
-.sample-task-prompt>button:disabled{opacity:.55}
-.sample-task-prompt>small{color:#ffd0d0;font-size:11px}
 @media(max-width:600px){.form-grid input[type=date],.form-grid input[type=time]{font-size:16px;padding:13px 14px;min-height:52px}.form-grid>div+div .form-label{margin-top:15px}}

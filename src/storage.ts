@@ -147,14 +147,6 @@ async function putRecord(storeName: string, value: TaskItem | GroupItem | Occurr
 export async function writeTask(task: TaskItem): Promise<void> {
   await putRecord(TASKS_STORE, task)
 }
-export async function writeTasks(tasks: TaskItem[]): Promise<void> {
-  if (!tasks.length) return
-  const database = await openDatabase()
-  const transaction = database.transaction(TASKS_STORE, 'readwrite')
-  const store = transaction.objectStore(TASKS_STORE)
-  for (const task of tasks) store.put(task)
-  await transactionDone(transaction)
-}
 export async function writeGroup(group: GroupItem): Promise<void> {
   await putRecord(GROUPS_STORE, group)
 }
