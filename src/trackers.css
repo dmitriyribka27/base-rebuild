@@ -1,0 +1,49 @@
+/* BASE 0.9: compact, independent custom trackers. */
+.trackers-card{position:relative;margin:16px 0 34px;overflow:visible;border:1px solid #356baa;border-radius:18px;background:linear-gradient(145deg,#0c2c64,#071a3b);box-shadow:inset 0 1px #ffffff1a}
+.trackers-heading{display:flex;align-items:center;gap:12px;width:100%;padding:16px;border:0;background:transparent;text-align:left;color:#a3c9fc}
+.trackers-symbol{display:grid;place-items:center;width:35px;height:35px;border-radius:11px;border:1px solid #528ada;background:#174787;color:#a6dfff;font-size:22px}
+.trackers-heading-text{display:flex;flex:1;min-width:0;flex-direction:column;gap:5px}
+.trackers-heading-text strong{font-size:14px;color:#f2f8ff}
+.trackers-heading-text small{font-size:11px;color:#95b6e0}
+.trackers-body{padding:0 13px 15px}
+.trackers-empty,.trackers-note{margin:8px 3px 13px;color:#91b1dd;font-size:11px;line-height:1.65}
+.trackers-note{margin:14px 4px 0;font-size:10px}
+.tracker-entry{position:relative;padding:14px 3px;border-bottom:1px solid #3a619a66}
+.tracker-edit{position:absolute;right:1px;top:12px;display:grid;place-items:center;width:31px;height:31px;border:1px solid #386da9;border-radius:9px;background:#0a2553;color:#9cc8f5}
+.tracker-reading-title{padding-right:37px;display:flex;align-items:center;flex-wrap:wrap;gap:5px 12px;margin:0 0 11px}
+.tracker-reading-title strong{font-size:13px;color:#f0f6ff}
+.tracker-reading-title small{font-size:11px;color:#91b9ea}
+.tracker-boolean{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.tracker-boolean button,.tracker-scale button{min-height:41px;border:1px solid #386da9;border-radius:10px;background:#081d43;color:#afc9ea;font-weight:730;font-size:13px}
+.tracker-boolean button.selected,.tracker-scale button.selected{border-color:#91d8ff;background:linear-gradient(145deg,#2368cf,#113d84);color:#fff;box-shadow:0 0 14px #2a80ec40}
+.tracker-boolean button:disabled,.tracker-scale button:disabled{opacity:.5}
+.tracker-scale{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.tracker-number{display:grid;grid-template-columns:minmax(0,1fr) 48px;gap:8px}
+.tracker-number input{width:100%;min-width:0;height:43px;border:1px solid #4382c9;border-radius:10px;background:#071a39;color:#e9f3ff;padding:0 13px;font-size:16px}
+.tracker-number button{display:grid;place-items:center;border-radius:10px;border:1px solid #5f99e0;background:#164b99;color:#d0ebff}
+.tracker-error{grid-column:1/-1;color:#ffc0be;font-size:10px}
+.tracker-create{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;min-height:46px;border:1px dashed #4b87c9;border-radius:12px;margin:14px 0 0;background:#0c2b60;color:#c7e4ff;font-size:12px;font-weight:700}
+.tracker-archive{margin-top:13px;font-size:11px;color:#9cbee4}
+.tracker-archive>button{padding:7px 0;background:transparent;border:0;color:#96c9fc;text-decoration:underline}
+.tracker-archive-row{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid #31619a;padding:9px 0}
+.tracker-archive-row>button{display:flex;align-items:center;gap:5px;background:#113d7c;border:1px solid #4077b1;border-radius:8px;padding:7px;color:#e4f4ff}
+.tracker-modal{max-width:min(540px,100vw - 18px)}
+.tracker-archive-action{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;margin-top:10px;border:0;background:transparent;color:#9fbce1;font-size:12px}
+.quests-light-row{display:flex;align-items:center;justify-content:space-between;gap:13px;padding:11px 7px 13px;border-bottom:1px solid #3669a066}
+.quests-light-description{display:flex;flex-direction:column;gap:4px;min-width:0}
+.quests-light-description strong{font-size:11px;color:#d9ebff}
+.quests-light-description small{font-size:10px;line-height:1.4;color:#8faede}
+.quests-light-toggle{flex-shrink:0;min-width:73px;padding:10px;border:1px solid #4584cc;border-radius:10px;background:#0d2b5e;color:#b6d9ff;font-size:11px;font-weight:750}
+.quests-light-toggle.on{border-color:#8ad2ff;background:#1a5dac;color:#fff}
+.quests-show-more{width:100%;padding:12px 8px;margin-top:5px;border:1px solid #3b6aa3;border-radius:10px;background:#092554;color:#b8d6f6;font-size:11px}
+.rpg-achievements{margin-top:27px}
+.rpg-achievements h2{font-size:20px;margin:0 0 7px;color:#eef7ff}
+.rpg-achievements>p{font-size:11px;color:#91b9ea;margin:0 0 14px;line-height:1.5}
+.achievement-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.achievement-item{display:flex;flex-direction:column;gap:7px;min-width:0;min-height:132px;padding:13px;border:1px solid #3a71b1;border-radius:13px;background:linear-gradient(150deg,#10336d,#0b2351)}
+.achievement-item.locked{opacity:.56;filter:saturate(.6)}
+.achievement-icon{font-size:24px;color:#96d9ff}
+.achievement-item strong{font-size:12px;color:#eef6ff}
+.achievement-item small{font-size:10px;color:#9abde6;line-height:1.45}
+.achievement-item em{margin-top:auto;font-size:9px;font-style:normal;color:#8fd6ff}
+@media(min-width:780px){.achievement-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}

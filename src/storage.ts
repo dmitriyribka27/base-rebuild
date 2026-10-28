@@ -3,9 +3,10 @@ import { defaultCollections, type CollectionItem, type ListEntry } from './colle
 import type { DailyReport, JournalEntry, TaskMove } from './journal'
 import { QUESTS, questRecordId, type QuestCompletion } from './rpg'
 import { occurrenceId } from './schedule'
+import { trackerReadingId, type TrackerDefinition, type TrackerReading, type DayMode } from './trackers'
 
 const DATABASE = 'base-rebuild'
-const VERSION = 5
+const VERSION = 6
 const TASKS_STORE = 'tasks'
 const GROUPS_STORE = 'groups'
 const OCCURRENCES_STORE = 'occurrences'
@@ -15,15 +16,19 @@ const JOURNAL_STORE = 'journals'
 const REPORT_STORE = 'dailyReports'
 const MOVES_STORE = 'taskMoves'
 const QUESTS_STORE = 'questCompletions'
-const STORES = [TASKS_STORE, GROUPS_STORE, OCCURRENCES_STORE, COLLECTIONS_STORE, ENTRIES_STORE, JOURNAL_STORE, REPORT_STORE, MOVES_STORE, QUESTS_STORE]
+const TRACKERS_STORE = 'trackers'
+const READINGS_STORE = 'trackerReadings'
+const DAY_MODES_STORE = 'dayModes'
+const STORES = [TASKS_STORE, GROUPS_STORE, OCCURRENCES_STORE, COLLECTIONS_STORE, ENTRIES_STORE, JOURNAL_STORE, REPORT_STORE, MOVES_STORE, QUESTS_STORE, TRACKERS_STORE, READINGS_STORE, DAY_MODES_STORE]
 export const BACKUP_FORMAT = 'BASE_REBUILD_BACKUP'
-export const BACKUP_VERSION = 5
+export const BACKUP_VERSION = 6
 
 export type AppData = {
   tasks: TaskItem[]; groups: GroupItem[]; occurrences: OccurrenceItem[]
   collections: CollectionItem[]; collectionEntries: ListEntry[]
   journals: JournalEntry[]; dailyReports: DailyReport[]; taskMoves: TaskMove[]
   questCompletions: QuestCompletion[]
+  trackers: TrackerDefinition[]; trackerReadings: TrackerReading[]; dayModes: DayMode[]
 }
 export type Backup = AppData & {
   format: typeof BACKUP_FORMAT
@@ -74,6 +79,12 @@ function openDatabase(): Promise<IDBDatabase> {
         const store = database.createObjectStore(QUESTS_STORE, { keyPath: 'id' })
         store.createIndex('byDate', 'date')
       }
+      if (!database.objectStoreNames.contains(TRACKERS_STORE)) database.createObjectStore(TRACKERS_STORE, { keyPath: 'id' })
+      if (!database.objectStoreNames.contains(READINGS_STORE)) {
+        const store = database.createObjectStore(READINGS_STORE, { keyPath: 'id' })
+        store.createIndex('byDate', 'date')
+      }
+      if (!database.objectStoreNames.contains(DAY_MODES_STORE)) database.createObjectStore(DAY_MODES_STORE, { keyPath: 'date' })
     }
     request.onsuccess = () => {
       const database = request.result
@@ -106,6 +117,9 @@ export async function readAllData(): Promise<AppData> {
   const dailyReports = transaction.objectStore(REPORT_STORE).getAll()
   const taskMoves = transaction.objectStore(MOVES_STORE).getAll()
   const questCompletions = transaction.objectStore(QUESTS_STORE).getAll()
+  const trackers = transaction.objectStore(TRACKERS_STORE).getAll()
+  const trackerReadings = transaction.objectStore(READINGS_STORE).getAll()
+  const dayModes = transaction.objectStore(DAY_MODES_STORE).getAll()
   await transactionDone(transaction)
   return {
     tasks: tasks.result as TaskItem[],
@@ -117,10 +131,13 @@ export async function readAllData(): Promise<AppData> {
     dailyReports: dailyReports.result as DailyReport[],
     taskMoves: taskMoves.result as TaskMove[],
     questCompletions: questCompletions.result as QuestCompletion[],
+    trackers: (trackers.result as TrackerDefinition[]).sort((a, b) => a.order - b.order),
+    trackerReadings: trackerReadings.result as TrackerReading[],
+    dayModes: dayModes.result as DayMode[],
   }
 }
 
-async function putRecord(storeName: string, value: TaskItem | GroupItem | OccurrenceItem | CollectionItem | ListEntry | JournalEntry | DailyReport | TaskMove | QuestCompletion) {
+async function putRecord(storeName: string, value: TaskItem | GroupItem | OccurrenceItem | CollectionItem | ListEntry | JournalEntry | DailyReport | TaskMove | QuestCompletion | TrackerDefinition | TrackerReading | DayMode) {
   const database = await openDatabase()
   const transaction = database.transaction(storeName, 'readwrite')
   transaction.objectStore(storeName).put(value)
@@ -151,6 +168,9 @@ export async function writeDailyReport(report: DailyReport): Promise<void> {
 export async function writeQuestCompletion(completion: QuestCompletion): Promise<void> {
   await putRecord(QUESTS_STORE, completion)
 }
+export async function writeTracker(tracker: TrackerDefinition): Promise<void> { await putRecord(TRACKERS_STORE, tracker) }
+export async function writeTrackerReading(reading: TrackerReading): Promise<void> { await putRecord(READINGS_STORE, reading) }
+export async function writeDayMode(mode: DayMode): Promise<void> { await putRecord(DAY_MODES_STORE, mode) }
 export async function writeTaskAndMove(task: TaskItem, move: TaskMove): Promise<void> {
   const database = await openDatabase()
   const transaction = database.transaction([TASKS_STORE, MOVES_STORE], 'readwrite')
@@ -189,6 +209,9 @@ export async function replaceAllData(data: AppData): Promise<void> {
   for (const report of data.dailyReports) transaction.objectStore(REPORT_STORE).put(report)
   for (const move of data.taskMoves) transaction.objectStore(MOVES_STORE).put(move)
   for (const completion of data.questCompletions) transaction.objectStore(QUESTS_STORE).put(completion)
+  for (const tracker of data.trackers) transaction.objectStore(TRACKERS_STORE).put(tracker)
+  for (const reading of data.trackerReadings) transaction.objectStore(READINGS_STORE).put(reading)
+  for (const mode of data.dayModes) transaction.objectStore(DAY_MODES_STORE).put(mode)
   await transactionDone(transaction)
 }
 
@@ -309,11 +332,37 @@ function isQuestCompletion(value: unknown): value is QuestCompletion {
     && typeof item.done === 'boolean' && validIso(item.updatedAt)
     && (item.done ? validIso(item.completedAt) : item.completedAt === null)
 }
+function isTracker(value: unknown): value is TrackerDefinition {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  return typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 128
+    && typeof item.title === 'string' && item.title.trim().length > 0 && item.title.length <= 70
+    && ['boolean', 'number', 'scale'].includes(item.type as string)
+    && typeof item.unit === 'string' && item.unit.length <= 20
+    && Number.isInteger(item.order) && (item.order as number) >= 0
+    && typeof item.archived === 'boolean' && validIso(item.createdAt) && validIso(item.updatedAt)
+}
+function isTrackerReading(value: unknown, trackerIds: Set<string>, trackerTypes: Map<string, TrackerDefinition['type']>): value is TrackerReading {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  const type = trackerTypes.get(item.trackerId as string)
+  const validValue = item.value === null || (type === 'boolean' ? typeof item.value === 'boolean'
+    : type === 'scale' ? Number.isInteger(item.value) && (item.value as number) >= 1 && (item.value as number) <= 10
+    : type === 'number' ? typeof item.value === 'number' && Number.isFinite(item.value) && (item.value as number) >= 0 && (item.value as number) <= 1_000_000_000 : false)
+  return typeof item.trackerId === 'string' && trackerIds.has(item.trackerId)
+    && validDate(item.date) && item.id === trackerReadingId(item.date as string, item.trackerId)
+    && validValue && validIso(item.updatedAt)
+}
+function isDayMode(value: unknown): value is DayMode {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  return validDate(item.date) && typeof item.light === 'boolean' && validIso(item.updatedAt)
+}
 
 export function parseBackup(input: unknown): AppData {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Файл не является резервной копией BASE.')
   const data = input as Record<string, unknown>
-  if (data.format !== BACKUP_FORMAT || ![1, 2, 3, 4, BACKUP_VERSION].includes(data.schemaVersion as number)) {
+  if (data.format !== BACKUP_FORMAT || ![1, 2, 3, 4, 5, BACKUP_VERSION].includes(data.schemaVersion as number)) {
     throw new Error('Неподдерживаемый формат или версия резервной копии.')
   }
   if (!Array.isArray(data.tasks) || data.tasks.length > 30000) throw new Error('Некорректный список задач в резервной копии.')
@@ -363,10 +412,22 @@ export function parseBackup(input: unknown): AppData {
     || new Set(importedReports.map(item => item.date)).size !== importedReports.length) throw new Error('Некорректная история отчётов.')
   if (!Array.isArray(importedMoves) || importedMoves.length > 100000 || !importedMoves.every(item => isMove(item, taskIds))
     || new Set(importedMoves.map(item => item.id)).size !== importedMoves.length) throw new Error('Некорректная история переносов.')
-  const importedQuests = data.schemaVersion === BACKUP_VERSION ? data.questCompletions : []
+  const importedQuests = (data.schemaVersion as number) >= 5 ? data.questCompletions : []
   if (!Array.isArray(importedQuests) || importedQuests.length > 400000 || !importedQuests.every(isQuestCompletion)
     || new Set(importedQuests.map(item => item.id)).size !== importedQuests.length) throw new Error('Некорректные отметки RPG-квестов.')
+  const importedTrackers = data.schemaVersion === BACKUP_VERSION ? data.trackers : []
+  if (!Array.isArray(importedTrackers) || importedTrackers.length > 500 || !importedTrackers.every(isTracker)
+    || new Set(importedTrackers.map(item => item.id)).size !== importedTrackers.length) throw new Error('Некорректные определения трекеров.')
+  const trackerIds = new Set((importedTrackers as TrackerDefinition[]).map(item => item.id))
+  const types = new Map((importedTrackers as TrackerDefinition[]).map(item => [item.id, item.type]))
+  const importedReadings = data.schemaVersion === BACKUP_VERSION ? data.trackerReadings : []
+  if (!Array.isArray(importedReadings) || importedReadings.length > 400000 || !importedReadings.every(item => isTrackerReading(item, trackerIds, types))
+    || new Set(importedReadings.map(item => item.id)).size !== importedReadings.length) throw new Error('Некорректные значения трекеров.')
+  const importedModes = data.schemaVersion === BACKUP_VERSION ? data.dayModes : []
+  if (!Array.isArray(importedModes) || importedModes.length > 40000 || !importedModes.every(isDayMode)
+    || new Set(importedModes.map(item => item.date)).size !== importedModes.length) throw new Error('Некорректные режимы дней.')
   return { tasks, groups: importedGroups, occurrences, collections, collectionEntries,
     journals: importedJournals as JournalEntry[], dailyReports: importedReports as DailyReport[], taskMoves: importedMoves as TaskMove[],
-    questCompletions: importedQuests as QuestCompletion[] }
+    questCompletions: importedQuests as QuestCompletion[],
+    trackers: importedTrackers as TrackerDefinition[], trackerReadings: importedReadings as TrackerReading[], dayModes: importedModes as DayMode[] }
 }

@@ -11,6 +11,8 @@ const { parseBackup, createBackup, BACKUP_FORMAT } = await importTypeScript('src
 const { collectionProgress, linkedTask, setEntryDone, setTaskDone, defaultCollections } = await importTypeScript('src/collections.ts')
 const { emptyJournal, makeDailyReport, sleepHours } = await importTypeScript('src/journal.ts')
 const { QUESTS, MAX_DAILY_XP, XP_PER_LEVEL, questRecordId, dailyQuestXp, completedQuestCount, hasCompletedQuest, experience, programDay } = await importTypeScript('src/rpg.ts')
+const { trackerReadingId, readingsForReport, lightDay, recordedDays } = await importTypeScript('src/trackers.ts')
+const { achievements } = await importTypeScript('src/achievements.ts')
 
 const date = '2026-10-29'
 const task = (repeat, overrides = {}) => ({
@@ -43,9 +45,9 @@ assert.equal(periodDates(date, 'week').length, 7)
 assert.equal(periodDates(date, 'month').length, 31)
 assert.equal(periodDates('2027-02-05', 'month').length, 28)
 
-const original = { tasks: [task('none')], groups: [{ id: 'work', name: 'Работа', emoji: '▦', note: '', order: 0 }], occurrences: [], collections: defaultCollections, collectionEntries: [], journals: [], dailyReports: [], taskMoves: [], questCompletions: [] }
+const original = { tasks: [task('none')], groups: [{ id: 'work', name: 'Работа', emoji: '▦', note: '', order: 0 }], occurrences: [], collections: defaultCollections, collectionEntries: [], journals: [], dailyReports: [], taskMoves: [], questCompletions: [], trackers: [], trackerReadings: [], dayModes: [] }
 const backup = createBackup(original)
-assert.equal(backup.schemaVersion, 5)
+assert.equal(backup.schemaVersion, 6)
 assert.deepEqual(parseBackup(backup), original)
 
 const legacyTask = task('none')
@@ -59,11 +61,15 @@ assert.equal(imported.collections.length, 7)
 assert.deepEqual(imported.collectionEntries, [])
 assert.deepEqual(imported.journals, [])
 assert.deepEqual(imported.questCompletions, [])
+assert.deepEqual(imported.trackers, [])
+assert.deepEqual(imported.trackerReadings, [])
+assert.deepEqual(imported.dayModes, [])
 const priorBackup = { ...backup, schemaVersion: 2, collections: undefined, collectionEntries: undefined }
 assert.equal(parseBackup(priorBackup).collections.length, 7)
 assert.deepEqual(parseBackup(priorBackup).tasks, original.tasks)
 assert.deepEqual(parseBackup({ ...backup, schemaVersion: 3, journals: undefined, dailyReports: undefined, taskMoves: undefined }).journals, [])
 assert.deepEqual(parseBackup({ ...backup, schemaVersion: 4, questCompletions: undefined }).questCompletions, [])
+assert.deepEqual(parseBackup({ ...backup, schemaVersion: 5, trackers: undefined, trackerReadings: undefined, dayModes: undefined }), original)
 assert.throws(() => parseBackup({ ...backup, tasks: [task('daily', { group: 'nonexistent' })] }))
 assert.throws(() => parseBackup({ ...backup, occurrences: [{ ...occurrence, taskId: 'missing' }] }))
 
@@ -154,4 +160,34 @@ assert.match(xpReport, /XP за день: 100/)
 assert.match(xpReport, /Общий XP на эту дату: 100/)
 assert.match(xpReport, /ЕЖЕДНЕВНЫЕ КВЕСТЫ\n- Слово = действие \(\+25 XP\)/)
 
-console.log('PASS: recurrence, collection links, RPG quests/levels, journal/report accuracy, task moves, JSON v1-v5 migration and invalid data')
+// 0.9 trackers: absent !== explicit 0 !== explicit No. Archiving doesn't erase readings.
+const tracker = (id, type, unit = '') => ({ id, title: id, type, unit, order: 0, archived: false, createdAt: timestamp, updatedAt: timestamp })
+const definitions = [tracker('exercise', 'boolean'), tracker('water', 'number', 'стаканов'), tracker('wellbeing', 'scale')]
+const reading = (id, value) => ({ id: trackerReadingId(date, id), date, trackerId: id, value, updatedAt: timestamp })
+const readings = [reading('exercise', false), reading('water', 0), reading('wellbeing', null)]
+assert.deepEqual(readingsForReport(definitions, readings, date), ['exercise: нет', 'water: 0 стаканов'])
+assert.equal(recordedDays(readings), 1)
+assert.equal(readingsForReport(definitions, [], date).length, 0)
+const modes = [{ date, light: true, updatedAt: timestamp }]
+assert.equal(lightDay(modes, date), true)
+assert.equal(lightDay(modes, '2026-10-28'), false)
+assert.equal(experience(allQuests).totalXp, experience(allQuests).totalXp)
+const trackerBackup = createBackup({ ...original, trackers: definitions, trackerReadings: readings, dayModes: modes })
+assert.deepEqual(parseBackup(trackerBackup).trackers, definitions)
+assert.deepEqual(parseBackup(trackerBackup).trackerReadings, readings)
+assert.deepEqual(parseBackup(trackerBackup).dayModes, modes)
+assert.deepEqual(parseBackup({ ...trackerBackup, trackers: definitions.map(row => ({ ...row, archived: true })) }).trackerReadings, readings)
+assert.throws(() => parseBackup({ ...trackerBackup, trackerReadings: [...readings, reading('exercise', true)] }), /трекеров/)
+assert.throws(() => parseBackup({ ...trackerBackup, trackerReadings: [reading('missing', 1)] }), /трекеров/)
+assert.throws(() => parseBackup({ ...trackerBackup, trackerReadings: [reading('wellbeing', 0)] }), /трекеров/)
+assert.throws(() => parseBackup({ ...trackerBackup, trackerReadings: [reading('exercise', 0)] }), /трекеров/)
+assert.throws(() => parseBackup({ ...trackerBackup, dayModes: [modes[0], modes[0]] }), /дней/)
+const trackerReport = makeDailyReport({ date, journal, tasks: [], groups: original.groups, occurrences: [], taskMoves: [], questCompletions: allQuests, trackers: definitions, trackerReadings: readings, dayModes: modes, comment: '' })
+assert.match(trackerReport, /Режим дня: облегчённый/)
+assert.match(trackerReport, /ТРЕКЕРЫ\n- exercise: нет\n- water: 0 стаканов/)
+const badges = achievements({ quests: allQuests, reports: [], readings, dayModes: modes })
+assert.equal(badges.filter(badge => badge.unlocked).length, 4)
+assert.equal(badges.find(badge => badge.id === 'firstReport').unlocked, false)
+assert.equal(achievements({ quests: [], reports: [], readings: [], dayModes: [] }).filter(badge => badge.unlocked).length, 0)
+
+console.log('PASS: recurrence, collection links, RPG quests/levels, journal/report accuracy, task moves, tracker zero/false/light days, achievements, JSON v1-v6 migration and invalid data')

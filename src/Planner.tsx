@@ -4,7 +4,9 @@ import { localDate, shiftDay, type GroupItem, type OccurrenceItem, type RepeatRu
 import { periodDates, recurrenceOf, scheduledForDate, sortedTasks, type ScheduledTask, type SortMode, type StatusFilter } from './schedule'
 import GroupManager, { type GroupDraft } from './GroupManager'
 import QuestPanel from './QuestPanel'
+import TrackerPanel, { type TrackerDraft } from './TrackerPanel'
 import type { QuestCompletion, QuestId } from './rpg'
+import { lightDay, type DayMode, type TrackerDefinition, type TrackerReading } from './trackers'
 
 export type TaskDraft = { text: string; group: string; date: string; time: string; notes: string; priority: TaskPriority; repeat: RepeatRule; repeatUntil: string }
 type CalendarMode = 'day' | 'week' | 'month'
@@ -49,13 +51,19 @@ function filterRows(rows: ScheduledTask[], status: StatusFilter, group: string) 
   return rows.filter(row => (status === 'all' || row.done === (status === 'done')) && (group === 'all' || row.task.group === group))
 }
 
-export default function Planner({ tasks, groups, occurrences, questCompletions, questSavingId, onToggleQuest, today, storage, saving, onSave, onToggle, onDelete, onSaveGroup }: {
+export default function Planner({ tasks, groups, occurrences, questCompletions, questSavingId, onToggleQuest, dayModes, onToggleLight, trackers, trackerReadings, onSaveTracker, onRecordTracker, today, storage, saving, onSave, onToggle, onDelete, onSaveGroup }: {
   tasks: TaskItem[]
   groups: GroupItem[]
   occurrences: OccurrenceItem[]
   questCompletions: QuestCompletion[]
   questSavingId: string | null
   onToggleQuest: (date: string, questId: QuestId) => Promise<void>
+  dayModes: DayMode[]
+  onToggleLight: (date: string) => Promise<void>
+  trackers: TrackerDefinition[]
+  trackerReadings: TrackerReading[]
+  onSaveTracker: (draft: TrackerDraft, existing?: TrackerDefinition) => Promise<void>
+  onRecordTracker: (tracker: TrackerDefinition, date: string, value: boolean | number | null) => Promise<void>
   today: string
   storage: StorageState
   saving: boolean
@@ -163,7 +171,8 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
       {period.every(day => !day.filtered.length) && <div className="empty-day"><CalendarDays size={28} strokeWidth={1.3} /><strong>{totals.count ? 'По фильтру ничего нет' : 'На этот период нет задач'}</strong><span>Нажми «+» и добавь дело на выбранную дату.</span></div>}
     </div>}
     <button className="add-inline" onClick={add} disabled={storage !== 'ready'}><CirclePlus size={20} strokeWidth={1.6} /><span>Добавить задачу</span><ArrowRight size={18} /></button>
-    {mode === 'day' && <QuestPanel date={selected} today={today} records={questCompletions} ready={storage === 'ready'} savingId={questSavingId} onToggle={onToggleQuest}/>}
+    {mode === 'day' && <><QuestPanel key={selected} date={selected} today={today} records={questCompletions} ready={storage === 'ready'} savingId={questSavingId} lightEnabled={lightDay(dayModes, selected)} lightSaving={saving} onToggle={onToggleQuest} onToggleLight={onToggleLight}/>
+      <TrackerPanel date={selected} trackers={trackers} readings={trackerReadings} ready={storage === 'ready'} saving={saving} onSave={onSaveTracker} onRecord={onRecordTracker}/></>}
     <button className="floating-add" aria-label="Добавить задачу" onClick={add} disabled={storage !== 'ready'}><Plus size={29} strokeWidth={1.8} /></button>
 
     {managingGroups && <GroupManager groups={groups} tasks={tasks} saving={saving} onSave={onSaveGroup} onClose={() => setManagingGroups(false)} />}

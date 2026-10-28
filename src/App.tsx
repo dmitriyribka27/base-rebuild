@@ -8,9 +8,11 @@ import { dateKey, defaultGroups, localDate, type GroupItem, type OccurrenceItem,
 import { defaultCollections, linkedTask, setEntryDone, setTaskDone, type CollectionItem, type ListEntry } from './collections'
 import { sleepHours, type DailyReport, type JournalEntry, type TaskMove } from './journal'
 import { XP_PER_LEVEL, QUESTS, experience, questRecordId, type QuestCompletion, type QuestId } from './rpg'
+import { trackerReadingId, lightDay, type DayMode, type TrackerDefinition, type TrackerReading } from './trackers'
 import { occurrenceId, recurrenceOf, scheduledForDate, type ScheduledTask } from './schedule'
-import { createBackup, parseBackup, readAllData, replaceAllData, writeCollection, writeCollectionEntry, writeDailyReport, writeEntryPair, writeGroup, writeJournal, writeLinkedTaskAndEntry, writeOccurrence, writeQuestCompletion, writeTask, writeTaskAndMove, type AppData } from './storage'
+import { createBackup, parseBackup, readAllData, replaceAllData, writeCollection, writeCollectionEntry, writeDailyReport, writeDayMode, writeEntryPair, writeGroup, writeJournal, writeLinkedTaskAndEntry, writeOccurrence, writeQuestCompletion, writeTask, writeTaskAndMove, writeTracker, writeTrackerReading, type AppData } from './storage'
 import Planner, { type TaskDraft } from './Planner'
+import type { TrackerDraft } from './TrackerPanel'
 import type { GroupDraft } from './GroupManager'
 import Lists, { type CollectionDraft, type EntryDraft } from './Lists'
 import Journal from './Journal'
@@ -74,6 +76,9 @@ export default function App() {
   const [dailyReports, setDailyReports] = useState<DailyReport[]>([])
   const [taskMoves, setTaskMoves] = useState<TaskMove[]>([])
   const [questCompletions, setQuestCompletions] = useState<QuestCompletion[]>([])
+  const [trackers, setTrackers] = useState<TrackerDefinition[]>([])
+  const [trackerReadings, setTrackerReadings] = useState<TrackerReading[]>([])
+  const [dayModes, setDayModes] = useState<DayMode[]>([])
   const [questSavingId, setQuestSavingId] = useState<string | null>(null)
   const questWriteLock = useRef(false)
   const [storage, setStorage] = useState<StorageState>('loading')
@@ -98,6 +103,9 @@ export default function App() {
       setDailyReports(data.dailyReports)
       setTaskMoves(data.taskMoves)
       setQuestCompletions(data.questCompletions)
+      setTrackers(data.trackers)
+      setTrackerReadings(data.trackerReadings)
+      setDayModes(data.dayModes)
       setStorage('ready')
     }
     readAllData().then(apply).catch(error => { if (active) { setStorage('error'); setStorageError(error instanceof Error ? error.message : 'Хранилище недоступно.') } })
@@ -363,9 +371,58 @@ export default function App() {
     finally { questWriteLock.current = false; setQuestSavingId(null) }
   }
 
+  async function saveTracker(draft: TrackerDraft, existing?: TrackerDefinition) {
+    if (storage !== 'ready' || saving) throw new Error('Хранилище пока недоступно.')
+    const title = draft.title.trim()
+    if (!title) throw new Error('Введи название трекера.')
+    if (trackers.some(item => item.id !== existing?.id && item.title.toLowerCase() === title.toLowerCase() && !item.archived && !draft.archived)) throw new Error('Трекер с таким названием уже есть.')
+    if (!existing && trackers.length >= 500) throw new Error('Достигнут лимит 500 трекеров.')
+    if (existing && existing.type !== draft.type && trackerReadings.some(row => row.trackerId === existing.id && row.value !== null)) throw new Error('Тип трекера с историей значений менять нельзя.')
+    const timestamp = new Date().toISOString()
+    const tracker: TrackerDefinition = {
+      id: existing?.id ?? (crypto.randomUUID?.() ?? `tracker-${Date.now()}-${Math.random().toString(36).slice(2)}`),
+      title, type: draft.type, unit: draft.type === 'number' ? draft.unit.trim() : '',
+      order: existing?.order ?? (Math.max(0, ...trackers.map(item => item.order)) + 1),
+      archived: draft.archived, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp,
+    }
+    setSaving(true)
+    try {
+      await writeTracker(tracker)
+      setTrackers(items => [...items.filter(item => item.id !== tracker.id), tracker].sort((a, b) => a.order - b.order))
+      setNotice(tracker.archived ? 'Трекер перемещён в архив, записи сохранены' : 'Трекер сохранён')
+    } finally { setSaving(false) }
+  }
+
+  async function recordTracker(tracker: TrackerDefinition, date: string, value: boolean | number | null) {
+    if (storage !== 'ready' || saving) return
+    if (tracker.type === 'boolean' && value !== null && typeof value !== 'boolean') return
+    if (tracker.type === 'scale' && value !== null && (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 10)) return
+    if (tracker.type === 'number' && value !== null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1_000_000_000)) return
+    const reading: TrackerReading = { id: trackerReadingId(date, tracker.id), trackerId: tracker.id, date, value, updatedAt: new Date().toISOString() }
+    setSaving(true)
+    try {
+      await writeTrackerReading(reading)
+      setTrackerReadings(items => [...items.filter(item => item.id !== reading.id), reading])
+      setNotice(value === null ? 'Значение трекера очищено' : 'Значение трекера сохранено')
+    } catch { setNotice('Не удалось сохранить значение трекера.') }
+    finally { setSaving(false) }
+  }
+
+  async function toggleLight(date: string) {
+    if (storage !== 'ready' || saving || date > today) return
+    const mode: DayMode = { date, light: !lightDay(dayModes, date), updatedAt: new Date().toISOString() }
+    setSaving(true)
+    try {
+      await writeDayMode(mode)
+      setDayModes(items => [...items.filter(item => item.date !== date), mode])
+      setNotice(mode.light ? 'Облегчённый день включён. XP без изменений.' : 'Обычный режим квестов включён.')
+    } catch { setNotice('Не удалось сохранить режим дня.') }
+    finally { setSaving(false) }
+  }
+
   function exportBackup() {
     if (storage !== 'ready') return
-    const file = new File([JSON.stringify(createBackup({ tasks, groups, occurrences, collections, collectionEntries, journals, dailyReports, taskMoves, questCompletions }), null, 2)], `BASE-backup-${dateKey(new Date())}.json`, { type: 'application/json' })
+    const file = new File([JSON.stringify(createBackup({ tasks, groups, occurrences, collections, collectionEntries, journals, dailyReports, taskMoves, questCompletions, trackers, trackerReadings, dayModes }), null, 2)], `BASE-backup-${dateKey(new Date())}.json`, { type: 'application/json' })
     if (typeof navigator.share === 'function' && navigator.canShare?.({ files: [file] })) {
       void navigator.share({ title: 'Резервная копия BASE: REBUILD', files: [file] }).catch(error => {
         if (error instanceof Error && error.name !== 'AbortError') setNotice('Не удалось поделиться файлом. Попробуй ещё раз.')
@@ -397,6 +454,7 @@ export default function App() {
       setCollections(pendingImport.collections); setCollectionEntries(pendingImport.collectionEntries)
       setJournals(pendingImport.journals); setDailyReports(pendingImport.dailyReports); setTaskMoves(pendingImport.taskMoves)
       setQuestCompletions(pendingImport.questCompletions)
+      setTrackers(pendingImport.trackers); setTrackerReadings(pendingImport.trackerReadings); setDayModes(pendingImport.dayModes)
       setPendingImport(null); setImportError(''); setNotice('Данные восстановлены из резервной копии')
       setInfoOpen(false)
     } catch (error) { setImportError(error instanceof Error ? error.message : 'Не удалось восстановить данные.') }
@@ -405,26 +463,27 @@ export default function App() {
 
   const deleted = tasks.filter(task => task.deletedAt)
   return <div className="app-shell">
-    <header className="app-header"><button className="brand" onClick={() => setTab('home')} aria-label="BASE: REBUILD, перейти домой"><span className="brand-mark">B<span>·</span></span><span className="brand-words">BASE<span>REBUILD / 0.8</span></span></button><div className="header-right"><span className="demo-chip"><i /> {storage === 'ready' ? 'ЛОКАЛЬНО' : storage === 'loading' ? 'ЗАГРУЗКА' : 'ОШИБКА'}</span><button className="header-settings" onClick={() => setInfoOpen(true)} aria-label="Данные и резервные копии"><Settings2 size={19} strokeWidth={1.7} /></button></div></header>
+    <header className="app-header"><button className="brand" onClick={() => setTab('home')} aria-label="BASE: REBUILD, перейти домой"><span className="brand-mark">B<span>·</span></span><span className="brand-words">BASE<span>REBUILD / 0.9</span></span></button><div className="header-right"><span className="demo-chip"><i /> {storage === 'ready' ? 'ЛОКАЛЬНО' : storage === 'loading' ? 'ЗАГРУЗКА' : 'ОШИБКА'}</span><button className="header-settings" onClick={() => setInfoOpen(true)} aria-label="Данные и резервные копии"><Settings2 size={19} strokeWidth={1.7} /></button></div></header>
     {storage === 'error' && <div className="storage-alert" role="alert"><strong>Данные недоступны</strong><span>{storageError} Новые задачи не будут записываться.</span></div>}
-    <main className="app-main">{tab === 'home' ? <Home today={today} tasks={tasks} occurrences={occurrences} journals={journals} questCompletions={questCompletions} ready={storage === 'ready'} onToday={() => setTab('today')} onJournal={() => setTab('journal')} /> : tab === 'today' ? <Planner today={today} tasks={tasks} groups={groups} occurrences={occurrences} questCompletions={questCompletions} questSavingId={questSavingId} onToggleQuest={toggleQuest} storage={storage} saving={saving} onSave={save} onToggle={toggle} onDelete={remove} onSaveGroup={saveGroup} /> : tab === 'lists' ? <Lists collections={collections} entries={collectionEntries} tasks={tasks} groups={groups} today={today} ready={storage === 'ready'} saving={saving} onSaveCollection={saveCollection} onSaveEntry={saveEntry} onToggleEntry={toggleEntry} onDeleteEntry={deleteEntry} onRestoreEntry={restoreEntry} onMoveEntry={moveEntry} onPlanEntry={planEntry} /> : tab === 'journal' ? <Journal today={today} ready={storage === 'ready'} journals={journals} reports={dailyReports} taskMoves={taskMoves} questCompletions={questCompletions} tasks={tasks} groups={groups} occurrences={occurrences} onUpdate={updateJournal} onSaveReport={saveReport} /> : <Progress today={today} records={questCompletions} ready={storage === 'ready'}/>}</main>
+    <main className="app-main">{tab === 'home' ? <Home today={today} tasks={tasks} occurrences={occurrences} journals={journals} questCompletions={questCompletions} ready={storage === 'ready'} onToday={() => setTab('today')} onJournal={() => setTab('journal')} /> : tab === 'today' ? <Planner today={today} tasks={tasks} groups={groups} occurrences={occurrences} questCompletions={questCompletions} questSavingId={questSavingId} onToggleQuest={toggleQuest} dayModes={dayModes} onToggleLight={toggleLight} trackers={trackers} trackerReadings={trackerReadings} onSaveTracker={saveTracker} onRecordTracker={recordTracker} storage={storage} saving={saving} onSave={save} onToggle={toggle} onDelete={remove} onSaveGroup={saveGroup} /> : tab === 'lists' ? <Lists collections={collections} entries={collectionEntries} tasks={tasks} groups={groups} today={today} ready={storage === 'ready'} saving={saving} onSaveCollection={saveCollection} onSaveEntry={saveEntry} onToggleEntry={toggleEntry} onDeleteEntry={deleteEntry} onRestoreEntry={restoreEntry} onMoveEntry={moveEntry} onPlanEntry={planEntry} /> : tab === 'journal' ? <Journal today={today} ready={storage === 'ready'} journals={journals} reports={dailyReports} taskMoves={taskMoves} questCompletions={questCompletions} trackers={trackers} trackerReadings={trackerReadings} dayModes={dayModes} tasks={tasks} groups={groups} occurrences={occurrences} onUpdate={updateJournal} onSaveReport={saveReport} /> : <Progress today={today} records={questCompletions} reports={dailyReports} readings={trackerReadings} dayModes={dayModes} ready={storage === 'ready'}/>}</main>
     <nav className="bottom-nav" aria-label="Основная навигация">{nav.map(({ id, name, Icon }) => <button key={id} className={tab === id ? 'current' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}><Icon size={21} strokeWidth={tab === id ? 2 : 1.7} /><span>{name}</span>{tab === id && <i />}</button>)}</nav>
     {!!notice && <div className="app-notice" role="status"><span>{notice}</span><button aria-label="Закрыть уведомление" onClick={() => setNotice('')}><X size={16} /></button></div>}
     {infoOpen && <div className="modal-backdrop info-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !saving) setInfoOpen(false) }}>
       <div className="info-dialog data-dialog"><button aria-label="Закрыть" className="close-button" onClick={() => setInfoOpen(false)} disabled={saving}><X size={22} /></button>
-        <span className="info-icon"><ShieldCheck size={31} /></span><h2>Данные BASE v0.8</h2>
-        <p>Задачи, коллекции, дневник, RPG-квесты, опыт и история отчётов сохраняются в IndexedDB на этом устройстве. Они остаются после перезагрузки, но не синхронизируются с другими устройствами или ChatGPT. Очистка данных Safari может их удалить.</p>
+        <span className="info-icon"><ShieldCheck size={31} /></span><h2>Данные BASE v0.9</h2>
+        <p>Задачи, коллекции, дневник, RPG-квесты, трекеры и история отчётов сохраняются в IndexedDB на этом устройстве. Они остаются после перезагрузки, но не синхронизируются с другими устройствами или ChatGPT. Очистка данных Safari может их удалить.</p>
         <div className="data-status"><span>Активных задач и серий</span><strong>{tasks.filter(task => !task.deletedAt).length}</strong></div>
         <div className="data-status"><span>Пунктов в коллекциях</span><strong>{collectionEntries.filter(entry => !entry.deletedAt).length}</strong></div>
         <div className="data-status"><span>Дней в дневнике / отчётов</span><strong>{journals.length} / {dailyReports.length}</strong></div>
         <div className="data-status"><span>Общий опыт / уровень</span><strong>{experience(questCompletions).totalXp} XP / LVL {experience(questCompletions).level}</strong></div>
+        <div className="data-status"><span>Трекеров / записанных значений</span><strong>{trackers.filter(item => !item.archived).length} / {trackerReadings.filter(item => item.value !== null).length}</strong></div>
         <button className="data-action" onClick={exportBackup} disabled={storage !== 'ready' || saving}><Download size={18} /> Сохранить резервную копию JSON</button>
         <button className="data-action secondary" onClick={() => fileInput.current?.click()} disabled={storage !== 'ready' || saving}><Upload size={18} /> Восстановить из JSON</button>
         <input ref={fileInput} type="file" accept=".json,application/json" className="hidden-input" onChange={event => void onBackupFile(event)} aria-label="Выбрать резервную копию" />
         {!!importError && <p className="form-error" role="alert">{importError}</p>}
-        {pendingImport && <div className="import-warning" role="alert"><strong>Найдено {pendingImport.tasks.filter(task => !task.deletedAt).length} задач, {pendingImport.collectionEntries.filter(entry => !entry.deletedAt).length} пунктов коллекций, {pendingImport.journals.length} дней дневника и {pendingImport.questCompletions.filter(item => item.done).length} квестов</strong><p>Восстановление заменит все текущие локальные задачи, группы, коллекции, дневник, RPG-квесты, историю отчётов и корзину. Перед этим сохрани свою резервную копию.</p><button onClick={() => void confirmImport()} disabled={saving}>{saving ? 'Восстанавливаем…' : 'Подтвердить замену'}</button><button onClick={() => setPendingImport(null)} disabled={saving}>Отмена</button></div>}
+        {pendingImport && <div className="import-warning" role="alert"><strong>Найдено {pendingImport.tasks.filter(task => !task.deletedAt).length} задач, {pendingImport.collectionEntries.filter(entry => !entry.deletedAt).length} пунктов коллекций, {pendingImport.journals.length} дней дневника, {pendingImport.questCompletions.filter(item => item.done).length} квестов и {pendingImport.trackers.length} трекеров</strong><p>Восстановление заменит все текущие локальные задачи, группы, коллекции, дневник, RPG-квесты, трекеры, историю отчётов и корзину. Перед этим сохрани свою резервную копию.</p><button onClick={() => void confirmImport()} disabled={saving}>{saving ? 'Восстанавливаем…' : 'Подтвердить замену'}</button><button onClick={() => setPendingImport(null)} disabled={saving}>Отмена</button></div>}
         {deleted.length > 0 && <div className="trash-list"><h3><Trash2 size={15} /> Корзина · {deleted.length}</h3>{deleted.map(task => <div key={task.id}><span>{task.text}</span><button onClick={() => void restore(task)} disabled={saving} aria-label={`Вернуть задачу: ${task.text}`}><RotateCcw size={17} /></button></div>)}</div>}
-        <p className="data-footnote">Резервные копии v0.3–0.7 поддерживаются. За обычные задачи и пункты коллекций XP не начисляется; максимум за семь ежедневных квестов — 100 XP. Экспорт отчёта в ChatGPT выполняется только вручную.</p>
+        <p className="data-footnote">Резервные копии v0.3–0.8 поддерживаются. За обычные задачи, коллекции и трекеры XP не начисляется; максимум за семь ежедневных квестов — 100 XP. Экспорт отчёта в ChatGPT выполняется только вручную.</p>
       </div>
     </div>}
     <div className="desktop-side-note">BASE: REBUILD <span>PERSONAL LIFE SIMULATOR · LOCAL PLANNER</span></div>

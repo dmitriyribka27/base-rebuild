@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, CalendarCheck2, Check, ChevronLeft, ChevronRight
 import { localDate, shiftDay, type GroupItem, type OccurrenceItem, type TaskItem } from './demo'
 import { emptyJournal, makeDailyReport, sleepHours, type DailyReport, type JournalEntry, type TaskMove } from './journal'
 import type { QuestCompletion } from './rpg'
+import type { DayMode, TrackerDefinition, TrackerReading } from './trackers'
 
 type JournalField = Exclude<keyof JournalEntry, 'date' | 'updatedAt'>
 
@@ -14,13 +15,16 @@ function TextField({ id, title, placeholder, value, rows = 3, onChange }: { id: 
   return <div className="journal-text-field"><label htmlFor={id}>{title}</label><textarea id={id} placeholder={placeholder} rows={rows} maxLength={12000} value={value} onChange={event => onChange(event.target.value)}/></div>
 }
 
-export default function Journal({ today, ready, journals, reports, taskMoves, questCompletions, tasks, groups, occurrences, onUpdate, onSaveReport }: {
+export default function Journal({ today, ready, journals, reports, taskMoves, questCompletions, trackers, trackerReadings, dayModes, tasks, groups, occurrences, onUpdate, onSaveReport }: {
   today: string
   ready: boolean
   journals: JournalEntry[]
   reports: DailyReport[]
   taskMoves: TaskMove[]
   questCompletions: QuestCompletion[]
+  trackers: TrackerDefinition[]
+  trackerReadings: TrackerReading[]
+  dayModes: DayMode[]
   tasks: TaskItem[]
   groups: GroupItem[]
   occurrences: OccurrenceItem[]
@@ -35,7 +39,7 @@ export default function Journal({ today, ready, journals, reports, taskMoves, qu
   const entry = journals.find(item => item.date === selected) ?? emptyJournal(selected)
   const savedReport = reports.find(item => item.date === selected)
   const duration = sleepHours(entry.sleepAt, entry.wakeAt)
-  const reportText = makeDailyReport({ date: selected, journal: journals.find(item => item.date === selected), tasks, groups, occurrences, taskMoves, questCompletions, comment })
+  const reportText = makeDailyReport({ date: selected, journal: journals.find(item => item.date === selected), tasks, groups, occurrences, taskMoves, questCompletions, trackers, trackerReadings, dayModes, comment })
   const history = [...reports].sort((a, b) => b.date.localeCompare(a.date))
 
   function update(field: JournalField, value: string | number | null) {

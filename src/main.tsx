@@ -8,6 +8,7 @@ import './v04.css'
 import './lists.css'
 import './journal.css'
 import './rpg.css'
+import './trackers.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

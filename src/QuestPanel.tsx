@@ -2,15 +2,21 @@ import { Check, ChevronDown, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { CHARACTERISTICS, QUESTS, MAX_DAILY_XP, completedQuestCount, dailyQuestXp, hasCompletedQuest, type QuestCompletion, type QuestId } from './rpg'
 
-export default function QuestPanel({ date, today, records, ready, savingId, onToggle }: {
+const lightQuestIds = new Set<QuestId>(['recovery', 'nicotine', 'joy'])
+
+export default function QuestPanel({ date, today, records, ready, savingId, lightEnabled, lightSaving, onToggle, onToggleLight }: {
   date: string
   today: string
   records: QuestCompletion[]
   ready: boolean
   savingId: string | null
+  lightEnabled: boolean
+  lightSaving: boolean
   onToggle: (date: string, questId: QuestId) => Promise<void>
+  onToggleLight: (date: string) => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(true)
+  const [showOthers, setShowOthers] = useState(false)
   const earned = dailyQuestXp(records, date)
   const completed = completedQuestCount(records, date)
   const isFuture = date > today
@@ -24,7 +30,8 @@ export default function QuestPanel({ date, today, records, ready, savingId, onTo
     <div className="quests-track" role="progressbar" aria-label="XP за выбранный день" aria-valuenow={earned} aria-valuemin={0} aria-valuemax={MAX_DAILY_XP}><div style={{ width: `${earned / MAX_DAILY_XP * 100}%` }}/></div>
     {expanded && <div className="quests-body">
       {isFuture && <p className="quests-help">Будущие квесты можно просмотреть, но отметить только после наступления даты.</p>}
-      {QUESTS.map(quest => {
+      <div className="quests-light-row"><span className="quests-light-description"><strong>☾ Облегчённый день</strong><small>Показываем три мягких квеста. Остальные доступны, XP и максимум не меняются.</small></span><button type="button" className={`quests-light-toggle${lightEnabled ? ' on' : ''}`} aria-pressed={lightEnabled} disabled={!ready || lightSaving || isFuture} onClick={() => void onToggleLight(date)}>{lightEnabled ? 'Включён' : 'Включить'}</button></div>
+      {QUESTS.filter(quest => !lightEnabled || showOthers || lightQuestIds.has(quest.id)).map(quest => {
         const checked = hasCompletedQuest(records, date, quest.id)
         const stat = CHARACTERISTICS.find(item => item.id === quest.characteristic)!
         const id = `${date}:${quest.id}`
@@ -38,6 +45,7 @@ export default function QuestPanel({ date, today, records, ready, savingId, onTo
           {savingId === id && <span className="sr-only">Сохраняем</span>}
         </button>
       })}
+      {lightEnabled && <button type="button" className="quests-show-more" onClick={() => setShowOthers(old => !old)}>{showOthers ? 'Скрыть дополнительные квесты' : 'Показать остальные четыре квеста'}</button>}
       <p className="quests-help">Это отметки по твоим словам. Обычные задачи и коллекции не дают дополнительных XP. Отменить ошибочную отметку можно в любой момент.</p>
     </div>}
   </section>

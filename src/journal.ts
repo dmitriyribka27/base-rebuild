@@ -1,6 +1,7 @@
 import { localDate, shiftDay, type GroupItem, type OccurrenceItem, type TaskItem } from './demo'
 import { scheduledForDate } from './schedule'
 import { QUESTS, dailyQuestXp, experience, hasCompletedQuest, type QuestCompletion } from './rpg'
+import { lightDay, readingsForReport, type TrackerDefinition, type TrackerReading, type DayMode } from './trackers'
 
 export type JournalEntry = {
   date: string
@@ -54,6 +55,9 @@ export function makeDailyReport(input: {
   occurrences: OccurrenceItem[]
   taskMoves: TaskMove[]
   questCompletions: QuestCompletion[]
+  trackers?: TrackerDefinition[]
+  trackerReadings?: TrackerReading[]
+  dayModes?: DayMode[]
   comment: string
 }) {
   const { date, journal, tasks, groups, occurrences, taskMoves, questCompletions, comment } = input
@@ -75,6 +79,8 @@ export function makeDailyReport(input: {
   const dayXp = dailyQuestXp(questCompletions, date)
   const rpg = experience(questCompletions, date)
   const quests = QUESTS.filter(quest => hasCompletedQuest(questCompletions, date, quest.id)).map(quest => `${quest.title} (+${quest.xp} XP)`)
+  const tracked = readingsForReport(input.trackers ?? [], input.trackerReadings ?? [], date)
+  const isLight = lightDay(input.dayModes ?? [], date)
   return `BASE: REBUILD — DAILY REPORT
 
 Дата: ${dateLabel}
@@ -82,6 +88,7 @@ export function makeDailyReport(input: {
 Уровень: LVL ${String(rpg.level).padStart(2, '0')} — ${rpg.title}
 XP за день: ${dayXp}
 Общий XP на эту дату: ${rpg.totalXp}
+Режим дня: ${isLight ? 'облегчённый' : 'обычный'}
 
 СОСТОЯНИЕ
 Сон: ${sleep}
@@ -101,6 +108,9 @@ ${lines(transferred)}
 
 ЕЖЕДНЕВНЫЕ КВЕСТЫ
 ${lines(quests)}
+
+ТРЕКЕРЫ
+${lines(tracked)}
 
 РАБОТА
 ${paragraph(journal?.workEvents)}
