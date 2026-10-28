@@ -1,16 +1,19 @@
 import { defaultGroups, type GroupItem, type OccurrenceItem, type RepeatRule, type TaskItem, type TaskPriority } from './demo'
+import { defaultCollections, type CollectionItem, type ListEntry } from './collections'
 import { occurrenceId } from './schedule'
 
 const DATABASE = 'base-rebuild'
-const VERSION = 2
+const VERSION = 3
 const TASKS_STORE = 'tasks'
 const GROUPS_STORE = 'groups'
 const OCCURRENCES_STORE = 'occurrences'
-const STORES = [TASKS_STORE, GROUPS_STORE, OCCURRENCES_STORE]
+const COLLECTIONS_STORE = 'collections'
+const ENTRIES_STORE = 'collectionEntries'
+const STORES = [TASKS_STORE, GROUPS_STORE, OCCURRENCES_STORE, COLLECTIONS_STORE, ENTRIES_STORE]
 export const BACKUP_FORMAT = 'BASE_REBUILD_BACKUP'
-export const BACKUP_VERSION = 2
+export const BACKUP_VERSION = 3
 
-export type AppData = { tasks: TaskItem[]; groups: GroupItem[]; occurrences: OccurrenceItem[] }
+export type AppData = { tasks: TaskItem[]; groups: GroupItem[]; occurrences: OccurrenceItem[]; collections: CollectionItem[]; collectionEntries: ListEntry[] }
 export type Backup = AppData & {
   format: typeof BACKUP_FORMAT
   schemaVersion: typeof BACKUP_VERSION
@@ -42,6 +45,14 @@ function openDatabase(): Promise<IDBDatabase> {
         const store = database.createObjectStore(OCCURRENCES_STORE, { keyPath: 'id' })
         store.createIndex('byDate', 'date')
       }
+      if (!database.objectStoreNames.contains(COLLECTIONS_STORE)) {
+        const store = database.createObjectStore(COLLECTIONS_STORE, { keyPath: 'id' })
+        defaultCollections.forEach(collection => store.put(collection))
+      }
+      if (!database.objectStoreNames.contains(ENTRIES_STORE)) {
+        const store = database.createObjectStore(ENTRIES_STORE, { keyPath: 'id' })
+        store.createIndex('byCollection', 'collectionId')
+      }
     }
     request.onsuccess = () => {
       const database = request.result
@@ -68,15 +79,19 @@ export async function readAllData(): Promise<AppData> {
   const tasks = transaction.objectStore(TASKS_STORE).getAll()
   const groups = transaction.objectStore(GROUPS_STORE).getAll()
   const occurrences = transaction.objectStore(OCCURRENCES_STORE).getAll()
+  const collections = transaction.objectStore(COLLECTIONS_STORE).getAll()
+  const collectionEntries = transaction.objectStore(ENTRIES_STORE).getAll()
   await transactionDone(transaction)
   return {
     tasks: tasks.result as TaskItem[],
     groups: (groups.result as GroupItem[]).sort((a, b) => a.order - b.order),
     occurrences: occurrences.result as OccurrenceItem[],
+    collections: (collections.result as CollectionItem[]).sort((a, b) => a.order - b.order),
+    collectionEntries: collectionEntries.result as ListEntry[],
   }
 }
 
-async function putRecord(storeName: string, value: TaskItem | GroupItem | OccurrenceItem) {
+async function putRecord(storeName: string, value: TaskItem | GroupItem | OccurrenceItem | CollectionItem | ListEntry) {
   const database = await openDatabase()
   const transaction = database.transaction(storeName, 'readwrite')
   transaction.objectStore(storeName).put(value)
@@ -92,15 +107,39 @@ export async function writeGroup(group: GroupItem): Promise<void> {
 export async function writeOccurrence(occurrence: OccurrenceItem): Promise<void> {
   await putRecord(OCCURRENCES_STORE, occurrence)
 }
+export async function writeCollection(collection: CollectionItem): Promise<void> {
+  await putRecord(COLLECTIONS_STORE, collection)
+}
+export async function writeCollectionEntry(entry: ListEntry): Promise<void> {
+  await putRecord(ENTRIES_STORE, entry)
+}
+
+// Keep the planner and collection checkmarks in one commit. If a write fails, both roll back.
+export async function writeLinkedTaskAndEntry(task: TaskItem, entry: ListEntry): Promise<void> {
+  const database = await openDatabase()
+  const transaction = database.transaction([TASKS_STORE, ENTRIES_STORE], 'readwrite')
+  transaction.objectStore(TASKS_STORE).put(task)
+  transaction.objectStore(ENTRIES_STORE).put(entry)
+  await transactionDone(transaction)
+}
+export async function writeEntryPair(first: ListEntry, second: ListEntry): Promise<void> {
+  const database = await openDatabase()
+  const transaction = database.transaction(ENTRIES_STORE, 'readwrite')
+  transaction.objectStore(ENTRIES_STORE).put(first)
+  transaction.objectStore(ENTRIES_STORE).put(second)
+  await transactionDone(transaction)
+}
 
 export async function replaceAllData(data: AppData): Promise<void> {
   const database = await openDatabase()
-  // One atomic transaction: a failed import rolls back ALL THREE stores.
+  // One atomic transaction: failed imports never partly overwrite an existing planner.
   const transaction = database.transaction(STORES, 'readwrite')
   for (const name of STORES) transaction.objectStore(name).clear()
   for (const task of data.tasks) transaction.objectStore(TASKS_STORE).put(task)
   for (const group of data.groups) transaction.objectStore(GROUPS_STORE).put(group)
   for (const occurrence of data.occurrences) transaction.objectStore(OCCURRENCES_STORE).put(occurrence)
+  for (const collection of data.collections) transaction.objectStore(COLLECTIONS_STORE).put(collection)
+  for (const entry of data.collectionEntries) transaction.objectStore(ENTRIES_STORE).put(entry)
   await transactionDone(transaction)
 }
 
@@ -144,6 +183,7 @@ function isTask(value: unknown, groupIds: Set<string>): value is TaskItem {
     && (item.deletedAt === null || validIso(item.deletedAt))
     && (item.repeat === undefined || repeats.has(item.repeat as RepeatRule))
     && (item.repeatUntil === undefined || item.repeatUntil === null || (validDate(item.repeatUntil) && item.repeatUntil >= item.date))
+    && (item.collectionItemId === undefined || item.collectionItemId === null || (typeof item.collectionItemId === 'string' && item.collectionItemId.length > 0 && item.collectionItemId.length <= 128))
 }
 function isOccurrence(value: unknown, taskIds: Set<string>): value is OccurrenceItem {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -154,10 +194,35 @@ function isOccurrence(value: unknown, taskIds: Set<string>): value is Occurrence
     && (item.completedAt === null || validIso(item.completedAt))
 }
 
+function isCollection(value: unknown): value is CollectionItem {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  return typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 128
+    && typeof item.name === 'string' && item.name.trim().length > 0 && item.name.length <= 70
+    && typeof item.emoji === 'string' && item.emoji.length <= 16
+    && typeof item.note === 'string' && item.note.length <= 200
+    && Number.isInteger(item.order) && (item.order as number) >= 0
+    && (item.archived === undefined || typeof item.archived === 'boolean')
+}
+
+function isEntry(value: unknown, collectionIds: Set<string>): value is ListEntry {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  return typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 128
+    && typeof item.collectionId === 'string' && collectionIds.has(item.collectionId)
+    && typeof item.text === 'string' && item.text.trim().length > 0 && item.text.length <= 180
+    && typeof item.note === 'string' && item.note.length <= 1000
+    && Array.isArray(item.tags) && item.tags.length <= 12 && item.tags.every(tag => typeof tag === 'string' && tag.trim().length > 0 && tag.length <= 35)
+    && typeof item.done === 'boolean' && Number.isInteger(item.order) && (item.order as number) >= 0
+    && validIso(item.createdAt) && validIso(item.updatedAt)
+    && (item.completedAt === null || validIso(item.completedAt))
+    && (item.deletedAt === null || validIso(item.deletedAt))
+}
+
 export function parseBackup(input: unknown): AppData {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Файл не является резервной копией BASE.')
   const data = input as Record<string, unknown>
-  if (data.format !== BACKUP_FORMAT || (data.schemaVersion !== 1 && data.schemaVersion !== BACKUP_VERSION)) {
+  if (data.format !== BACKUP_FORMAT || (data.schemaVersion !== 1 && data.schemaVersion !== 2 && data.schemaVersion !== BACKUP_VERSION)) {
     throw new Error('Неподдерживаемый формат или версия резервной копии.')
   }
   if (!Array.isArray(data.tasks) || data.tasks.length > 30000) throw new Error('Некорректный список задач в резервной копии.')
@@ -179,5 +244,24 @@ export function parseBackup(input: unknown): AppData {
   }
   const occurrences = importedOccurrences as OccurrenceItem[]
   if (new Set(occurrences.map(item => item.id)).size !== occurrences.length) throw new Error('Повторяются отметки выполнения.')
-  return { tasks, groups: importedGroups, occurrences }
+  const importedCollections = data.schemaVersion === 3 ? data.collections : defaultCollections.map(collection => ({ ...collection }))
+  if (!Array.isArray(importedCollections) || importedCollections.length > 300 || !importedCollections.every(isCollection)) {
+    throw new Error('Некорректные коллекции в резервной копии.')
+  }
+  const collections = importedCollections as CollectionItem[]
+  const collectionIds = new Set(collections.map(item => item.id))
+  if (collectionIds.size !== collections.length) throw new Error('Повторяются идентификаторы коллекций.')
+  const importedEntries = data.schemaVersion === 3 ? data.collectionEntries : []
+  if (!Array.isArray(importedEntries) || importedEntries.length > 50000 || !importedEntries.every(item => isEntry(item, collectionIds))) {
+    throw new Error('Некорректные пункты коллекций в резервной копии.')
+  }
+  const collectionEntries = importedEntries as ListEntry[]
+  const entryIds = new Set(collectionEntries.map(item => item.id))
+  if (entryIds.size !== collectionEntries.length) throw new Error('Повторяются идентификаторы пунктов.')
+  const linked = tasks.filter(task => task.collectionItemId)
+  if (linked.some(task => !entryIds.has(task.collectionItemId!) || (task.repeat && task.repeat !== 'none'))
+    || new Set(linked.filter(task => !task.deletedAt).map(task => task.collectionItemId)).size !== linked.filter(task => !task.deletedAt).length) {
+    throw new Error('Нарушены связи между коллекциями и планером.')
+  }
+  return { tasks, groups: importedGroups, occurrences, collections, collectionEntries }
 }

@@ -18,6 +18,7 @@ export type TaskItem = {
   deletedAt: string | null
   repeat?: RepeatRule
   repeatUntil?: string | null
+  collectionItemId?: string | null
 }
 
 export const defaultGroups: GroupItem[] = [
