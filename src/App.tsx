@@ -12,7 +12,8 @@ import { XP_PER_LEVEL, QUESTS, experience, questRecordId, type QuestCompletion, 
 import { trackerReadingId, lightDay, type DayMode, type TrackerDefinition, type TrackerReading } from './trackers'
 import { occurrenceId, recurrenceOf, scheduledForDate, type ScheduledTask } from './schedule'
 import { parsePaymentAmount } from './payments'
-import { createBackup, parseBackup, readAllData, replaceAllData, writeCollection, writeCollectionEntry, writeDailyReport, writeDayMode, writeEntryPair, writeGroup, writeJournal, writeLinkedTaskAndEntry, writeOccurrence, writeQuestCompletion, writeTask, writeTaskAndMove, writeTracker, writeTrackerReading, type AppData } from './storage'
+import { sampleTasksForDate } from './sampleTasks'
+import { createBackup, parseBackup, readAllData, replaceAllData, writeCollection, writeCollectionEntry, writeDailyReport, writeDayMode, writeEntryPair, writeGroup, writeJournal, writeLinkedTaskAndEntry, writeOccurrence, writeQuestCompletion, writeTask, writeTasks, writeTaskAndMove, writeTracker, writeTrackerReading, type AppData } from './storage'
 import Planner, { type TaskDraft } from './Planner'
 import type { TrackerDraft } from './TrackerPanel'
 import type { GroupDraft } from './GroupManager'
@@ -154,6 +155,19 @@ export default function App() {
       else await writeTask(task)
       setTasks(old => [...old.filter(row => row.id !== task.id), task])
       setNotice(existing ? 'Изменения сохранены' : 'Задача сохранена на устройстве')
+    } finally { setSaving(false) }
+  }
+
+  async function addSampleTasks(date: string) {
+    if (storage !== 'ready' || saving) throw new Error('Хранилище пока недоступно.')
+    const samples = sampleTasksForDate(date, groups, tasks)
+    if (!samples.length) return 0
+    setSaving(true)
+    try {
+      await writeTasks(samples)
+      setTasks(old => [...old, ...samples])
+      setNotice('Примеры добавлены. Их можно изменить или удалить.')
+      return samples.length
     } finally { setSaving(false) }
   }
 
@@ -453,7 +467,7 @@ export default function App() {
   return <div className="app-shell">
     <header className="app-header"><button className="brand" onClick={() => setTab('home')} aria-label="BASE: REBUILD, перейти домой"><span className="brand-mark">B<span>·</span></span><span className="brand-words">BASE<span>REBUILD / 1.1</span></span></button><div className="header-right"><span className="demo-chip"><i /> {storage === 'ready' ? 'ЛОКАЛЬНО' : storage === 'loading' ? 'ЗАГРУЗКА' : 'ОШИБКА'}</span><button className="header-settings" onClick={() => setInfoOpen(true)} aria-label="Данные и резервные копии"><Settings2 size={19} strokeWidth={1.7} /></button></div></header>
     {storage === 'error' && <div className="storage-alert" role="alert"><strong>Данные недоступны</strong><span>{storageError} Новые задачи не будут записываться.</span></div>}
-    <main className="app-main">{tab === 'home' ? <Home today={today} tasks={tasks} occurrences={occurrences} journals={journals} questCompletions={questCompletions} ready={storage === 'ready'} onToday={() => setTab('today')} onJournal={() => setTab('journal')} /> : tab === 'today' ? <Planner today={today} tasks={tasks} groups={groups} occurrences={occurrences} questCompletions={questCompletions} questSavingId={questSavingId} onToggleQuest={toggleQuest} dayModes={dayModes} onToggleLight={toggleLight} trackers={trackers} trackerReadings={trackerReadings} onSaveTracker={saveTracker} onRecordTracker={recordTracker} storage={storage} saving={saving} onSave={save} onToggle={toggle} onDelete={remove} onSaveGroup={saveGroup} /> : tab === 'lists' ? <Lists collections={collections} entries={collectionEntries} tasks={tasks} groups={groups} today={today} ready={storage === 'ready'} saving={saving} onSaveCollection={saveCollection} onSaveEntry={saveEntry} onDeleteEntry={deleteEntry} onRestoreEntry={restoreEntry} onMoveEntry={moveEntry} onPlanEntry={planEntry} /> : tab === 'journal' ? <Journal today={today} ready={storage === 'ready'} journals={journals} reports={dailyReports} taskMoves={taskMoves} questCompletions={questCompletions} trackers={trackers} trackerReadings={trackerReadings} dayModes={dayModes} tasks={tasks} groups={groups} occurrences={occurrences} onUpdate={updateJournal} onSaveReport={saveReport} /> : <Progress today={today} records={questCompletions} reports={dailyReports} trackers={trackers} readings={trackerReadings} journals={journals} dayModes={dayModes} ready={storage === 'ready'}/>}</main>
+    <main className="app-main">{tab === 'home' ? <Home today={today} tasks={tasks} occurrences={occurrences} journals={journals} questCompletions={questCompletions} ready={storage === 'ready'} onToday={() => setTab('today')} onJournal={() => setTab('journal')} /> : tab === 'today' ? <Planner today={today} tasks={tasks} groups={groups} occurrences={occurrences} questCompletions={questCompletions} questSavingId={questSavingId} onToggleQuest={toggleQuest} dayModes={dayModes} onToggleLight={toggleLight} trackers={trackers} trackerReadings={trackerReadings} onSaveTracker={saveTracker} onRecordTracker={recordTracker} storage={storage} saving={saving} onSave={save} onToggle={toggle} onDelete={remove} onSaveGroup={saveGroup} onAddSamples={addSampleTasks} /> : tab === 'lists' ? <Lists collections={collections} entries={collectionEntries} tasks={tasks} groups={groups} today={today} ready={storage === 'ready'} saving={saving} onSaveCollection={saveCollection} onSaveEntry={saveEntry} onDeleteEntry={deleteEntry} onRestoreEntry={restoreEntry} onMoveEntry={moveEntry} onPlanEntry={planEntry} /> : tab === 'journal' ? <Journal today={today} ready={storage === 'ready'} journals={journals} reports={dailyReports} taskMoves={taskMoves} questCompletions={questCompletions} trackers={trackers} trackerReadings={trackerReadings} dayModes={dayModes} tasks={tasks} groups={groups} occurrences={occurrences} onUpdate={updateJournal} onSaveReport={saveReport} /> : <Progress today={today} records={questCompletions} reports={dailyReports} trackers={trackers} readings={trackerReadings} journals={journals} dayModes={dayModes} ready={storage === 'ready'}/>}</main>
     <nav className="bottom-nav" aria-label="Основная навигация">{nav.map(({ id, name, Icon }) => <button key={id} className={tab === id ? 'current' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}><Icon size={21} strokeWidth={tab === id ? 2 : 1.7} /><span>{name}</span>{tab === id && <i />}</button>)}</nav>
     {!!notice && <div className="app-notice" role="status"><span>{notice}</span><button aria-label="Закрыть уведомление" onClick={() => setNotice('')}><X size={16} /></button></div>}
     {infoOpen && <div className="modal-backdrop info-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !saving) setInfoOpen(false) }}>

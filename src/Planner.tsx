@@ -1,8 +1,9 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { ArrowRight, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CirclePlus, Clock3, ListFilter, Pencil, Plus, Repeat2, Settings2, Trash2, Wallet, X } from 'lucide-react'
+import { ArrowRight, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CirclePlus, Clock3, ListFilter, Pencil, Plus, Repeat2, Settings2, Sparkles, Trash2, Wallet, X } from 'lucide-react'
 import { localDate, shiftDay, type GroupItem, type OccurrenceItem, type PaymentCurrency, type RepeatRule, type TaskItem, type TaskPriority } from './demo'
 import { periodDates, recurrenceOf, scheduledForDate, sortedTasks, type ScheduledTask, type SortMode, type StatusFilter } from './schedule'
-import { paymentLabel, upcomingPayments } from './payments'
+import { paymentLabel } from './payments'
+import { SAMPLE_TASK_COUNT } from './sampleTasks'
 import GroupManager, { type GroupDraft } from './GroupManager'
 import QuestPanel from './QuestPanel'
 import TrackerPanel, { type TrackerDraft } from './TrackerPanel'
@@ -52,7 +53,7 @@ function filterRows(rows: ScheduledTask[], status: StatusFilter, group: string) 
   return rows.filter(row => (status === 'all' || row.done === (status === 'done')) && (group === 'all' || row.task.group === group))
 }
 
-export default function Planner({ tasks, groups, occurrences, questCompletions, questSavingId, onToggleQuest, dayModes, onToggleLight, trackers, trackerReadings, onSaveTracker, onRecordTracker, today, storage, saving, onSave, onToggle, onDelete, onSaveGroup }: {
+export default function Planner({ tasks, groups, occurrences, questCompletions, questSavingId, onToggleQuest, dayModes, onToggleLight, trackers, trackerReadings, onSaveTracker, onRecordTracker, today, storage, saving, onSave, onToggle, onDelete, onSaveGroup, onAddSamples }: {
   tasks: TaskItem[]
   groups: GroupItem[]
   occurrences: OccurrenceItem[]
@@ -72,6 +73,7 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
   onToggle: (scheduled: ScheduledTask) => Promise<void>
   onDelete: (task: TaskItem) => Promise<void>
   onSaveGroup: (draft: GroupDraft, existing?: GroupItem) => Promise<void>
+  onAddSamples: (date: string) => Promise<number>
 }) {
   const [selected, setSelected] = useState(today)
   const [mode, setMode] = useState<CalendarMode>('day')
@@ -86,6 +88,7 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
   const [draft, setDraft] = useState<TaskDraft>({ text: '', group: 'work', date: today, time: '', notes: '', priority: 'normal', repeat: 'none', repeatUntil: '', kind: 'task', paymentAmount: '', paymentCurrency: 'USD' })
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [modalError, setModalError] = useState('')
+  const [samplesError, setSamplesError] = useState('')
 
   const dates = useMemo(() => periodDates(selected, mode), [selected, mode])
   const period = useMemo(() => dates.map(date => {
@@ -100,7 +103,8 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
   const percentage = totals.count ? Math.round(totals.done / totals.count * 100) : 0
   const shownDay = period[0]?.filtered ?? []
   const dailyAll = period[0]?.all ?? []
-  const upcoming = useMemo(() => upcomingPayments(tasks, occurrences, today).slice(0, 4), [tasks, occurrences, today])
+  const paymentsOnSelectedDate = scheduledForDate(tasks.filter(task => task.kind === 'payment'), occurrences, selected)
+  const canAddSamples = selected === today && !tasks.some(task => task.id.startsWith('sample-'))
 
   function add(kind: 'task' | 'payment' = 'task') {
     if (storage !== 'ready') return
@@ -141,6 +145,11 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
   function chooseDate(date: string) { setSelected(date); setMode('day') }
   function manageGroups(fromTask = false) { setResumeTaskAfterGroups(fromTask); if (fromTask) setDialog(false); setManagingGroups(true) }
   function closeGroupManager() { setManagingGroups(false); if (resumeTaskAfterGroups) setDialog(true); setResumeTaskAfterGroups(false) }
+  async function addSamples() {
+    setSamplesError('')
+    try { await onAddSamples(today) }
+    catch (error) { setSamplesError(error instanceof Error ? error.message : 'Не удалось добавить примеры.') }
+  }
 
   return <div className="page today-page">
     <div className="today-heading"><div><p className="eyebrow">ПЛАНЕР <span className="eyebrow-dot">/</span> {mode === 'day' ? 'ДЕНЬ' : mode === 'week' ? 'НЕДЕЛЯ' : 'МЕСЯЦ'}</p><h1>{selected === today && mode === 'day' ? 'Сегодня' : mode === 'day' ? 'План дня' : mode === 'week' ? 'Неделя' : 'Месяц'}<span className="mint-period">.</span></h1></div><button className="square-action" aria-label="Вернуться к сегодняшней дате" onClick={() => { setSelected(today); setMode('day') }}><CalendarDays size={19} strokeWidth={1.7} /></button></div>
@@ -149,9 +158,7 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
     <div className="view-toggle" role="tablist" aria-label="Режим календаря">{([{ id: 'day', label: 'День' }, { id: 'week', label: 'Неделя' }, { id: 'month', label: 'Месяц' }] as { id: CalendarMode; label: string }[]).map(item => <button role="tab" aria-selected={mode === item.id} className={mode === item.id ? 'active' : ''} key={item.id} onClick={() => setMode(item.id)}>{item.label}</button>)}</div>
     {mode === 'month' && <MonthPicker selected={selected} today={today} counts={counts} onSelect={chooseDate} />}
     <div className="task-progress"><div className="task-progress-caption"><div><span className="caps-label">ПРОГРЕСС {mode === 'day' ? 'ДНЯ' : mode === 'week' ? 'НЕДЕЛИ' : 'МЕСЯЦА'}</span><strong>{totals.done} <span>из {totals.count}</span></strong></div><span className="progress-percent">{percentage}%</span></div><div className="progress-track" role="progressbar" aria-valuenow={totals.done} aria-valuemin={0} aria-valuemax={totals.count || 1}><div className="progress-fill" style={{ width: `${percentage}%` }} /></div></div>
-    <section className="payment-calendar-card"><div className="payment-calendar-heading"><span className="payment-calendar-icon"><Wallet size={20}/></span><div><strong>Платежи в календаре</strong><small>Сумма, валюта и даты повторов</small></div><button disabled={storage !== 'ready'} onClick={() => add('payment')}><Plus size={16}/> Платёж</button></div>
-      {upcoming.length ? <div className="upcoming-payments">{upcoming.map(row => <button key={`${row.task.id}-${row.date}`} onClick={() => chooseDate(row.date)}><span><strong>{row.task.text}</strong><small>{localDate(row.date, { day: 'numeric', month: 'short', year: 'numeric' })}{row.recurring ? ' · каждый месяц' : ''}</small></span><b>{row.task.payment && paymentLabel(row.task.payment)}</b><ChevronRight size={15}/></button>)}</div> : <p className="upcoming-payments-empty">На ближайшие 60 дней платежи не добавлены.</p>}
-    </section>
+    <section className="payment-calendar-card"><div className="payment-calendar-heading"><span className="payment-calendar-icon"><Wallet size={20}/></span><div><strong>Платежи в календаре</strong><small>{mode === 'day' && paymentsOnSelectedDate.length ? `${paymentsOnSelectedDate.length} на выбранную дату · смотри в группах ниже` : 'Появляются только в дату оплаты'}</small></div><button disabled={storage !== 'ready'} onClick={() => add('payment')}><Plus size={16}/> Платёж</button></div></section>
     <div className="planner-tools">
       <div className="planner-filter-label"><ListFilter size={15} /> Вид задач</div>
       <div className="filter-pills">{([{ id: 'all', text: 'Все' }, { id: 'open', text: 'Открытые' }, { id: 'done', text: 'Готово' }] as { id: StatusFilter; text: string }[]).map(item => <button key={item.id} className={statusFilter === item.id ? 'active' : ''} onClick={() => setStatusFilter(item.id)}>{item.text}</button>)}</div>
@@ -188,6 +195,7 @@ export default function Planner({ tasks, groups, occurrences, questCompletions, 
       {period.every(day => !day.filtered.length) && <div className="empty-day"><CalendarDays size={28} strokeWidth={1.3} /><strong>{totals.count ? 'По фильтру ничего нет' : 'На этот период нет задач'}</strong><span>Нажми «+» и добавь дело на выбранную дату.</span></div>}
     </div>}
     <button className="add-inline" onClick={() => add()} disabled={storage !== 'ready'}><CirclePlus size={20} strokeWidth={1.6} /><span>Добавить задачу</span><ArrowRight size={18} /></button>
+    {storage === 'ready' && mode === 'day' && canAddSamples && <div className="sample-task-prompt"><div><Sparkles size={17}/><span>Хочешь проверить планер? Добавь {SAMPLE_TASK_COUNT} примеров на сегодня. Это не настоящие дела, их можно удалить.</span></div><button type="button" disabled={saving} onClick={() => void addSamples()}>Добавить примеры</button>{samplesError && <small role="alert">{samplesError}</small>}</div>}
     {mode === 'day' && <><QuestPanel key={selected} date={selected} today={today} records={questCompletions} ready={storage === 'ready'} savingId={questSavingId} lightEnabled={lightDay(dayModes, selected)} lightSaving={saving} onToggle={onToggleQuest} onToggleLight={onToggleLight}/>
       <TrackerPanel date={selected} trackers={trackers} readings={trackerReadings} ready={storage === 'ready'} saving={saving} onSave={onSaveTracker} onRecord={onRecordTracker}/></>}
     <button className="floating-add" aria-label="Добавить задачу" onClick={() => add()} disabled={storage !== 'ready'}><Plus size={29} strokeWidth={1.8} /></button>
