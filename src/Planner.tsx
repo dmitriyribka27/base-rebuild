@@ -3,6 +3,8 @@ import { ArrowRight, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight
 import { localDate, shiftDay, type GroupItem, type OccurrenceItem, type RepeatRule, type TaskItem, type TaskPriority } from './demo'
 import { periodDates, recurrenceOf, scheduledForDate, sortedTasks, type ScheduledTask, type SortMode, type StatusFilter } from './schedule'
 import GroupManager, { type GroupDraft } from './GroupManager'
+import QuestPanel from './QuestPanel'
+import type { QuestCompletion, QuestId } from './rpg'
 
 export type TaskDraft = { text: string; group: string; date: string; time: string; notes: string; priority: TaskPriority; repeat: RepeatRule; repeatUntil: string }
 type CalendarMode = 'day' | 'week' | 'month'
@@ -47,10 +49,13 @@ function filterRows(rows: ScheduledTask[], status: StatusFilter, group: string) 
   return rows.filter(row => (status === 'all' || row.done === (status === 'done')) && (group === 'all' || row.task.group === group))
 }
 
-export default function Planner({ tasks, groups, occurrences, today, storage, saving, onSave, onToggle, onDelete, onSaveGroup }: {
+export default function Planner({ tasks, groups, occurrences, questCompletions, questSavingId, onToggleQuest, today, storage, saving, onSave, onToggle, onDelete, onSaveGroup }: {
   tasks: TaskItem[]
   groups: GroupItem[]
   occurrences: OccurrenceItem[]
+  questCompletions: QuestCompletion[]
+  questSavingId: string | null
+  onToggleQuest: (date: string, questId: QuestId) => Promise<void>
   today: string
   storage: StorageState
   saving: boolean
@@ -158,6 +163,7 @@ export default function Planner({ tasks, groups, occurrences, today, storage, sa
       {period.every(day => !day.filtered.length) && <div className="empty-day"><CalendarDays size={28} strokeWidth={1.3} /><strong>{totals.count ? 'По фильтру ничего нет' : 'На этот период нет задач'}</strong><span>Нажми «+» и добавь дело на выбранную дату.</span></div>}
     </div>}
     <button className="add-inline" onClick={add} disabled={storage !== 'ready'}><CirclePlus size={20} strokeWidth={1.6} /><span>Добавить задачу</span><ArrowRight size={18} /></button>
+    {mode === 'day' && <QuestPanel date={selected} today={today} records={questCompletions} ready={storage === 'ready'} savingId={questSavingId} onToggle={onToggleQuest}/>}
     <button className="floating-add" aria-label="Добавить задачу" onClick={add} disabled={storage !== 'ready'}><Plus size={29} strokeWidth={1.8} /></button>
 
     {managingGroups && <GroupManager groups={groups} tasks={tasks} saving={saving} onSave={onSaveGroup} onClose={() => setManagingGroups(false)} />}

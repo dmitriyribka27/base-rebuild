@@ -1,7 +1,7 @@
 /* global self, caches, fetch */
 // Replaced by scripts/build-sw.mjs at build time.
-const CACHE_NAME = "base-rebuild-2147148247db343c"
-const FILES = ["./assets/index-ByLUO8Jl.css","./assets/index-D6XdoIY_.js","./icons/base-icon.svg","./icons/icon-180.png","./icons/icon-192.png","./icons/icon-512.png","./images/base-room-photo-v2.jpeg","./index.html","./manifest.webmanifest"]
+const CACHE_NAME = "base-rebuild-8c36a71b93d0c2d9"
+const FILES = ["./assets/index-Cp_DpPA1.css","./assets/index-DYk7VQf9.js","./icons/base-icon.svg","./icons/icon-180.png","./icons/icon-192.png","./icons/icon-512.png","./images/base-room-photo-v2.jpeg","./index.html","./manifest.webmanifest"]
 const OFFLINE_INDEX = new URL('./index.html', self.registration.scope).href
 
 self.addEventListener('install', event => {

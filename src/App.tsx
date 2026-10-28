@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  ArrowRight, ArrowUpRight, BookOpen, CalendarDays, Check, Download, House,
+  ArrowUpRight, BookOpen, CalendarDays, Check, Download, House,
   LayoutList, Moon, NotebookPen, RotateCcw, Settings2, ShieldCheck,
   Sparkles, Trash2, TrendingUp, Upload, X,
 } from 'lucide-react'
 import { dateKey, defaultGroups, localDate, type GroupItem, type OccurrenceItem, type TaskItem } from './demo'
 import { defaultCollections, linkedTask, setEntryDone, setTaskDone, type CollectionItem, type ListEntry } from './collections'
 import { sleepHours, type DailyReport, type JournalEntry, type TaskMove } from './journal'
+import { XP_PER_LEVEL, QUESTS, experience, questRecordId, type QuestCompletion, type QuestId } from './rpg'
 import { occurrenceId, recurrenceOf, scheduledForDate, type ScheduledTask } from './schedule'
-import { createBackup, parseBackup, readAllData, replaceAllData, writeCollection, writeCollectionEntry, writeDailyReport, writeEntryPair, writeGroup, writeJournal, writeLinkedTaskAndEntry, writeOccurrence, writeTask, writeTaskAndMove, type AppData } from './storage'
+import { createBackup, parseBackup, readAllData, replaceAllData, writeCollection, writeCollectionEntry, writeDailyReport, writeEntryPair, writeGroup, writeJournal, writeLinkedTaskAndEntry, writeOccurrence, writeQuestCompletion, writeTask, writeTaskAndMove, type AppData } from './storage'
 import Planner, { type TaskDraft } from './Planner'
 import type { GroupDraft } from './GroupManager'
 import Lists, { type CollectionDraft, type EntryDraft } from './Lists'
 import Journal from './Journal'
+import Progress from './Progress'
 
 type Tab = 'home' | 'today' | 'lists' | 'journal' | 'progress'
 type StorageState = 'loading' | 'ready' | 'error'
@@ -31,34 +33,33 @@ function taskCount(count: number) {
   return `${count} ${ending}`
 }
 
+function dayCount(count: number) {
+  const end = count % 10 === 1 && count % 100 !== 11 ? 'день'
+    : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14) ? 'дня' : 'дней'
+  return `${count} ${end}`
+}
+
 function taskMove(task: TaskItem, oldDate: string, movedAt: string): TaskMove {
   return { id: crypto.randomUUID?.() ?? `move-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     taskId: task.id, taskTitle: task.text, fromDate: oldDate, toDate: task.date, movedAt }
 }
 
-function Home({ onToday, onJournal, tasks, occurrences, journals, today, ready }: { onToday: () => void; onJournal: () => void; tasks: TaskItem[]; occurrences: OccurrenceItem[]; journals: JournalEntry[]; today: string; ready: boolean }) {
+function Home({ onToday, onJournal, tasks, occurrences, journals, questCompletions, today, ready }: { onToday: () => void; onJournal: () => void; tasks: TaskItem[]; occurrences: OccurrenceItem[]; journals: JournalEntry[]; questCompletions: QuestCompletion[]; today: string; ready: boolean }) {
   const daily = scheduledForDate(tasks, occurrences, today)
   const done = daily.filter(row => row.done).length
   const total = daily.length
   const journal = journals.find(item => item.date === today)
   const sleep = sleepHours(journal?.sleepAt ?? null, journal?.wakeAt ?? null)
+  const xp = experience(questCompletions)
   return <div className="page home-page">
-    <div className="page-intro"><p className="eyebrow">ГЛАВА 01 <span className="eyebrow-dot">·</span> ПРОБУЖДЕНИЕ</p><h1>Твоя база<span className="mint-period">.</span></h1><p className="lead">Маленькие действия. Настоящая жизнь.</p></div>
-    <section className="room-card" aria-label="Комната и персонаж Дмитрия по утверждённому изображению"><div className="room-topline"><span><span className="room-light" /> ЛИЧНОЕ ПРОСТРАНСТВО</span><span>01 / 01</span></div><div className="room-art"><img className="room-image" src={`${import.meta.env.BASE_URL}images/base-room-photo-v2.jpeg`} alt="Дмитрий в комнате с бетонными стенами, деревянным столом, креслами и видом на море в Батуми" /></div><div className="room-caption"><span>ДМИТРИЙ <i /> LVL 01</span><span className="room-chapter">BASE / ROOM</span></div></section>
-    <section className="level-card"><div className="level-top"><div><p className="small-label">ТЕКУЩИЙ УРОВЕНЬ</p><div className="level-name"><span className="level-number">01</span><div><strong>Пробуждение</strong><small>Начало пути</small></div></div></div><div className="level-xp"><strong>0 <span>XP</span></strong><small>из 700</small></div></div><div className="progress-track" role="progressbar" aria-valuenow={0} aria-valuemin={0} aria-valuemax={700}><div className="progress-fill" style={{ width: '0%' }}/></div></section>
+    <div className="page-intro"><p className="eyebrow">ГЛАВА {String(Math.min(xp.level,10)).padStart(2,'0')} <span className="eyebrow-dot">·</span> {xp.title.toUpperCase()}</p><h1>Твоя база<span className="mint-period">.</span></h1><p className="lead">Маленькие действия. Настоящая жизнь.</p></div>
+    <section className="room-card" aria-label="Комната и персонаж Дмитрия по утверждённому изображению"><div className="room-topline"><span><span className="room-light" /> ЛИЧНОЕ ПРОСТРАНСТВО</span><span>01 / 01</span></div><div className="room-art"><img className="room-image" src={`${import.meta.env.BASE_URL}images/base-room-photo-v2.jpeg`} alt="Дмитрий в комнате с бетонными стенами, деревянным столом, креслами и видом на море в Батуми" /></div><div className="room-caption"><span>ДМИТРИЙ <i /> LVL {String(xp.level).padStart(2,'0')}</span><span className="room-chapter">BASE / ROOM</span></div></section>
+    <section className="level-card"><div className="level-top"><div><p className="small-label">ТЕКУЩИЙ УРОВЕНЬ</p><div className="level-name"><span className="level-number">{String(xp.level).padStart(2,'0')}</span><div><strong>{xp.title}</strong><small>{xp.activeDays ? `${dayCount(xp.activeDays)} с выполненными квестами` : 'Начало пути'}</small></div></div></div><div className="level-xp"><strong>{xp.levelXp} <span>XP</span></strong><small>из {XP_PER_LEVEL}</small></div></div><div className="progress-track" role="progressbar" aria-valuenow={xp.levelXp} aria-valuemin={0} aria-valuemax={XP_PER_LEVEL}><div className="progress-fill" style={{ width: `${xp.levelPercent}%` }}/></div></section>
     <div className="section-title home-section-title"><h2>Твой день</h2><span>{localDate(today, { day: 'numeric', month: 'long' })}</span></div>
     <div className="daily-metrics"><div className="metric-card"><span className="metric-icon"><Sparkles size={17} strokeWidth={1.6} /></span><small>Энергия</small><strong>{journal?.energy ?? '—'} <span>/ 10</span></strong><em>{journal?.energy == null ? 'Нет записи' : 'Из дневника'}</em></div><div className="metric-card"><span className="metric-icon"><Moon size={17} strokeWidth={1.6} /></span><small>Сон</small><strong>{sleep == null ? '—' : sleep.toLocaleString('ru-RU')} <span>ч</span></strong><em>{sleep == null ? 'Нет расчёта' : 'По времени сна'}</em></div><div className="metric-card"><span className="metric-icon"><Check size={17} strokeWidth={1.6} /></span><small>Задачи</small><strong>{ready ? done : '—'} <span>/ {ready ? total : '—'}</span></strong><em>{ready ? 'Мой план' : 'Загрузка'}</em></div></div>
     <button className="today-preview" onClick={onToday}><div className="today-preview-icon"><CalendarDays size={20} strokeWidth={1.7} /></div><div className="today-preview-text"><strong>Открыть план на сегодня</strong><span>{ready ? (total ? `${taskCount(total)} · ${done} выполнено` : 'Пока нет задач. Начни с одной.') : 'Загружаем твой план…'}</span></div><ArrowUpRight size={19} /></button>
     <button className="today-preview" onClick={onJournal}><div className="today-preview-icon"><NotebookPen size={20} strokeWidth={1.7}/></div><div className="today-preview-text"><strong>Дневник и итоги дня</strong><span>Записать состояние и подготовить отчёт</span></div><ArrowUpRight size={19}/></button>
   </div>
-}
-
-function FutureScreen({ tab, onToday }: { tab: Tab; onToday: () => void }) {
-  const label = nav.find(item => item.id === tab)?.name ?? 'Раздел'
-  const notes: Record<string, string> = {
-    progress: 'Здесь будут шесть характеристик, реальные XP, уровни и достижения.',
-  }
-  return <div className="page future-screen"><p className="eyebrow">BASE / В РАЗРАБОТКЕ</p><h1>{label}<span className="mint-period">.</span></h1><div className="future-placeholder"><span className="future-symbol">✳</span><h2>Следующий этап</h2><p>{notes[tab]}</p><button onClick={onToday}>Вернуться в планер <ArrowRight size={17} /></button></div></div>
 }
 
 export default function App() {
@@ -72,6 +73,9 @@ export default function App() {
   const [journals, setJournals] = useState<JournalEntry[]>([])
   const [dailyReports, setDailyReports] = useState<DailyReport[]>([])
   const [taskMoves, setTaskMoves] = useState<TaskMove[]>([])
+  const [questCompletions, setQuestCompletions] = useState<QuestCompletion[]>([])
+  const [questSavingId, setQuestSavingId] = useState<string | null>(null)
+  const questWriteLock = useRef(false)
   const [storage, setStorage] = useState<StorageState>('loading')
   const [storageError, setStorageError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -93,6 +97,7 @@ export default function App() {
       setJournals(data.journals)
       setDailyReports(data.dailyReports)
       setTaskMoves(data.taskMoves)
+      setQuestCompletions(data.questCompletions)
       setStorage('ready')
     }
     readAllData().then(apply).catch(error => { if (active) { setStorage('error'); setStorageError(error instanceof Error ? error.message : 'Хранилище недоступно.') } })
@@ -340,9 +345,27 @@ export default function App() {
     setDailyReports(items => [...items.filter(item => item.date !== date), report])
   }
 
+  async function toggleQuest(date: string, questId: QuestId) {
+    if (storage !== 'ready' || date > today || questWriteLock.current) return
+    questWriteLock.current = true
+    const id = questRecordId(date, questId)
+    setQuestSavingId(id)
+    const timestamp = new Date().toISOString()
+    const old = questCompletions.find(record => record.id === id)
+    const done = !old?.done
+    const completion: QuestCompletion = { id, date, questId, done, completedAt: done ? timestamp : null, updatedAt: timestamp }
+    try {
+      await writeQuestCompletion(completion)
+      setQuestCompletions(items => [...items.filter(item => item.id !== id), completion])
+      const quest = QUESTS.find(item => item.id === questId)!
+      setNotice(done ? `Квест отмечен: +${quest.xp} XP` : 'Ошибочная отметка отменена, опыт пересчитан')
+    } catch { setNotice('Не удалось сохранить квест. Проверь локальное хранилище.') }
+    finally { questWriteLock.current = false; setQuestSavingId(null) }
+  }
+
   function exportBackup() {
     if (storage !== 'ready') return
-    const file = new File([JSON.stringify(createBackup({ tasks, groups, occurrences, collections, collectionEntries, journals, dailyReports, taskMoves }), null, 2)], `BASE-backup-${dateKey(new Date())}.json`, { type: 'application/json' })
+    const file = new File([JSON.stringify(createBackup({ tasks, groups, occurrences, collections, collectionEntries, journals, dailyReports, taskMoves, questCompletions }), null, 2)], `BASE-backup-${dateKey(new Date())}.json`, { type: 'application/json' })
     if (typeof navigator.share === 'function' && navigator.canShare?.({ files: [file] })) {
       void navigator.share({ title: 'Резервная копия BASE: REBUILD', files: [file] }).catch(error => {
         if (error instanceof Error && error.name !== 'AbortError') setNotice('Не удалось поделиться файлом. Попробуй ещё раз.')
@@ -373,6 +396,7 @@ export default function App() {
       setTasks(pendingImport.tasks); setGroups(pendingImport.groups); setOccurrences(pendingImport.occurrences)
       setCollections(pendingImport.collections); setCollectionEntries(pendingImport.collectionEntries)
       setJournals(pendingImport.journals); setDailyReports(pendingImport.dailyReports); setTaskMoves(pendingImport.taskMoves)
+      setQuestCompletions(pendingImport.questCompletions)
       setPendingImport(null); setImportError(''); setNotice('Данные восстановлены из резервной копии')
       setInfoOpen(false)
     } catch (error) { setImportError(error instanceof Error ? error.message : 'Не удалось восстановить данные.') }
@@ -381,25 +405,26 @@ export default function App() {
 
   const deleted = tasks.filter(task => task.deletedAt)
   return <div className="app-shell">
-    <header className="app-header"><button className="brand" onClick={() => setTab('home')} aria-label="BASE: REBUILD, перейти домой"><span className="brand-mark">B<span>·</span></span><span className="brand-words">BASE<span>REBUILD / 0.7.2</span></span></button><div className="header-right"><span className="demo-chip"><i /> {storage === 'ready' ? 'ЛОКАЛЬНО' : storage === 'loading' ? 'ЗАГРУЗКА' : 'ОШИБКА'}</span><button className="header-settings" onClick={() => setInfoOpen(true)} aria-label="Данные и резервные копии"><Settings2 size={19} strokeWidth={1.7} /></button></div></header>
+    <header className="app-header"><button className="brand" onClick={() => setTab('home')} aria-label="BASE: REBUILD, перейти домой"><span className="brand-mark">B<span>·</span></span><span className="brand-words">BASE<span>REBUILD / 0.8</span></span></button><div className="header-right"><span className="demo-chip"><i /> {storage === 'ready' ? 'ЛОКАЛЬНО' : storage === 'loading' ? 'ЗАГРУЗКА' : 'ОШИБКА'}</span><button className="header-settings" onClick={() => setInfoOpen(true)} aria-label="Данные и резервные копии"><Settings2 size={19} strokeWidth={1.7} /></button></div></header>
     {storage === 'error' && <div className="storage-alert" role="alert"><strong>Данные недоступны</strong><span>{storageError} Новые задачи не будут записываться.</span></div>}
-    <main className="app-main">{tab === 'home' ? <Home today={today} tasks={tasks} occurrences={occurrences} journals={journals} ready={storage === 'ready'} onToday={() => setTab('today')} onJournal={() => setTab('journal')} /> : tab === 'today' ? <Planner today={today} tasks={tasks} groups={groups} occurrences={occurrences} storage={storage} saving={saving} onSave={save} onToggle={toggle} onDelete={remove} onSaveGroup={saveGroup} /> : tab === 'lists' ? <Lists collections={collections} entries={collectionEntries} tasks={tasks} groups={groups} today={today} ready={storage === 'ready'} saving={saving} onSaveCollection={saveCollection} onSaveEntry={saveEntry} onToggleEntry={toggleEntry} onDeleteEntry={deleteEntry} onRestoreEntry={restoreEntry} onMoveEntry={moveEntry} onPlanEntry={planEntry} /> : tab === 'journal' ? <Journal today={today} ready={storage === 'ready'} journals={journals} reports={dailyReports} taskMoves={taskMoves} tasks={tasks} groups={groups} occurrences={occurrences} onUpdate={updateJournal} onSaveReport={saveReport} /> : <FutureScreen tab={tab} onToday={() => setTab('today')} />}</main>
+    <main className="app-main">{tab === 'home' ? <Home today={today} tasks={tasks} occurrences={occurrences} journals={journals} questCompletions={questCompletions} ready={storage === 'ready'} onToday={() => setTab('today')} onJournal={() => setTab('journal')} /> : tab === 'today' ? <Planner today={today} tasks={tasks} groups={groups} occurrences={occurrences} questCompletions={questCompletions} questSavingId={questSavingId} onToggleQuest={toggleQuest} storage={storage} saving={saving} onSave={save} onToggle={toggle} onDelete={remove} onSaveGroup={saveGroup} /> : tab === 'lists' ? <Lists collections={collections} entries={collectionEntries} tasks={tasks} groups={groups} today={today} ready={storage === 'ready'} saving={saving} onSaveCollection={saveCollection} onSaveEntry={saveEntry} onToggleEntry={toggleEntry} onDeleteEntry={deleteEntry} onRestoreEntry={restoreEntry} onMoveEntry={moveEntry} onPlanEntry={planEntry} /> : tab === 'journal' ? <Journal today={today} ready={storage === 'ready'} journals={journals} reports={dailyReports} taskMoves={taskMoves} questCompletions={questCompletions} tasks={tasks} groups={groups} occurrences={occurrences} onUpdate={updateJournal} onSaveReport={saveReport} /> : <Progress today={today} records={questCompletions} ready={storage === 'ready'}/>}</main>
     <nav className="bottom-nav" aria-label="Основная навигация">{nav.map(({ id, name, Icon }) => <button key={id} className={tab === id ? 'current' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}><Icon size={21} strokeWidth={tab === id ? 2 : 1.7} /><span>{name}</span>{tab === id && <i />}</button>)}</nav>
     {!!notice && <div className="app-notice" role="status"><span>{notice}</span><button aria-label="Закрыть уведомление" onClick={() => setNotice('')}><X size={16} /></button></div>}
     {infoOpen && <div className="modal-backdrop info-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !saving) setInfoOpen(false) }}>
       <div className="info-dialog data-dialog"><button aria-label="Закрыть" className="close-button" onClick={() => setInfoOpen(false)} disabled={saving}><X size={22} /></button>
-        <span className="info-icon"><ShieldCheck size={31} /></span><h2>Данные BASE v0.7.2</h2>
-        <p>Задачи, коллекции, дневник и история отчётов сохраняются в IndexedDB на этом устройстве. Они остаются после перезагрузки, но не синхронизируются с другими устройствами или ChatGPT. Очистка данных Safari может их удалить.</p>
+        <span className="info-icon"><ShieldCheck size={31} /></span><h2>Данные BASE v0.8</h2>
+        <p>Задачи, коллекции, дневник, RPG-квесты, опыт и история отчётов сохраняются в IndexedDB на этом устройстве. Они остаются после перезагрузки, но не синхронизируются с другими устройствами или ChatGPT. Очистка данных Safari может их удалить.</p>
         <div className="data-status"><span>Активных задач и серий</span><strong>{tasks.filter(task => !task.deletedAt).length}</strong></div>
         <div className="data-status"><span>Пунктов в коллекциях</span><strong>{collectionEntries.filter(entry => !entry.deletedAt).length}</strong></div>
         <div className="data-status"><span>Дней в дневнике / отчётов</span><strong>{journals.length} / {dailyReports.length}</strong></div>
+        <div className="data-status"><span>Общий опыт / уровень</span><strong>{experience(questCompletions).totalXp} XP / LVL {experience(questCompletions).level}</strong></div>
         <button className="data-action" onClick={exportBackup} disabled={storage !== 'ready' || saving}><Download size={18} /> Сохранить резервную копию JSON</button>
         <button className="data-action secondary" onClick={() => fileInput.current?.click()} disabled={storage !== 'ready' || saving}><Upload size={18} /> Восстановить из JSON</button>
         <input ref={fileInput} type="file" accept=".json,application/json" className="hidden-input" onChange={event => void onBackupFile(event)} aria-label="Выбрать резервную копию" />
         {!!importError && <p className="form-error" role="alert">{importError}</p>}
-        {pendingImport && <div className="import-warning" role="alert"><strong>Найдено {pendingImport.tasks.filter(task => !task.deletedAt).length} задач, {pendingImport.collectionEntries.filter(entry => !entry.deletedAt).length} пунктов коллекций и {pendingImport.journals.length} дней дневника</strong><p>Восстановление заменит все текущие локальные задачи, группы, коллекции, дневник, историю отчётов и корзину. Перед этим сохрани свою резервную копию.</p><button onClick={() => void confirmImport()} disabled={saving}>{saving ? 'Восстанавливаем…' : 'Подтвердить замену'}</button><button onClick={() => setPendingImport(null)} disabled={saving}>Отмена</button></div>}
+        {pendingImport && <div className="import-warning" role="alert"><strong>Найдено {pendingImport.tasks.filter(task => !task.deletedAt).length} задач, {pendingImport.collectionEntries.filter(entry => !entry.deletedAt).length} пунктов коллекций, {pendingImport.journals.length} дней дневника и {pendingImport.questCompletions.filter(item => item.done).length} квестов</strong><p>Восстановление заменит все текущие локальные задачи, группы, коллекции, дневник, RPG-квесты, историю отчётов и корзину. Перед этим сохрани свою резервную копию.</p><button onClick={() => void confirmImport()} disabled={saving}>{saving ? 'Восстанавливаем…' : 'Подтвердить замену'}</button><button onClick={() => setPendingImport(null)} disabled={saving}>Отмена</button></div>}
         {deleted.length > 0 && <div className="trash-list"><h3><Trash2 size={15} /> Корзина · {deleted.length}</h3>{deleted.map(task => <div key={task.id}><span>{task.text}</span><button onClick={() => void restore(task)} disabled={saving} aria-label={`Вернуть задачу: ${task.text}`}><RotateCcw size={17} /></button></div>)}</div>}
-        <p className="data-footnote">Резервные копии v0.3–0.6 поддерживаются. RPG-квесты и XP подключим отдельно. За обычные задачи и пункты коллекций XP пока не начисляется. Экспорт отчёта в ChatGPT выполняется только вручную.</p>
+        <p className="data-footnote">Резервные копии v0.3–0.7 поддерживаются. За обычные задачи и пункты коллекций XP не начисляется; максимум за семь ежедневных квестов — 100 XP. Экспорт отчёта в ChatGPT выполняется только вручную.</p>
       </div>
     </div>}
     <div className="desktop-side-note">BASE: REBUILD <span>PERSONAL LIFE SIMULATOR · LOCAL PLANNER</span></div>

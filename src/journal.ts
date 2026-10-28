@@ -1,5 +1,6 @@
 import { localDate, shiftDay, type GroupItem, type OccurrenceItem, type TaskItem } from './demo'
 import { scheduledForDate } from './schedule'
+import { QUESTS, dailyQuestXp, experience, hasCompletedQuest, type QuestCompletion } from './rpg'
 
 export type JournalEntry = {
   date: string
@@ -52,9 +53,10 @@ export function makeDailyReport(input: {
   groups: GroupItem[]
   occurrences: OccurrenceItem[]
   taskMoves: TaskMove[]
+  questCompletions: QuestCompletion[]
   comment: string
 }) {
-  const { date, journal, tasks, groups, occurrences, taskMoves, comment } = input
+  const { date, journal, tasks, groups, occurrences, taskMoves, questCompletions, comment } = input
   const forDay = scheduledForDate(tasks, occurrences, date)
   const groupNames = new Map(groups.map(group => [group.id, group.name]))
   const taskLabel = (task: TaskItem) => `[${groupNames.get(task.group) ?? 'Без группы'}] ${task.text}${task.time ? ` (${task.time})` : ''}`
@@ -70,13 +72,16 @@ export function makeDailyReport(input: {
   const paragraph = (text: string | undefined) => value(text)
   const thoughts = [journal?.thoughts, comment].map(v => v?.trim()).filter(Boolean).join('\n')
   const dateLabel = localDate(date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const dayXp = dailyQuestXp(questCompletions, date)
+  const rpg = experience(questCompletions, date)
+  const quests = QUESTS.filter(quest => hasCompletedQuest(questCompletions, date, quest.id)).map(quest => `${quest.title} (+${quest.xp} XP)`)
   return `BASE: REBUILD — DAILY REPORT
 
 Дата: ${dateLabel}
 Персонаж: Дмитрий
-Уровень: LVL 01 — Пробуждение (игровая прокачка ещё не подключена)
-XP за день: пока не отслеживается
-Общий XP: пока не отслеживается
+Уровень: LVL ${String(rpg.level).padStart(2, '0')} — ${rpg.title}
+XP за день: ${dayXp}
+Общий XP на эту дату: ${rpg.totalXp}
 
 СОСТОЯНИЕ
 Сон: ${sleep}
@@ -93,6 +98,9 @@ ${lines(incomplete)}
 
 ПЕРЕНЕСЕНО
 ${lines(transferred)}
+
+ЕЖЕДНЕВНЫЕ КВЕСТЫ
+${lines(quests)}
 
 РАБОТА
 ${paragraph(journal?.workEvents)}
